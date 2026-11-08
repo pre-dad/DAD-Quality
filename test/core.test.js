@@ -129,3 +129,24 @@ test('benchmark and legacy manifests can finish a non-acceptance report without 
   assert.match(await readFile(path.join(run.dir, 'report.html'), 'utf8'), /No versioned acceptance policy recorded/);
   assert.equal(run.data.decision.eligible, false);
 });
+
+test('common cloud, VCS and bearer credentials are redacted', () => {
+  const secrets = [
+    `ghp_${'a'.repeat(36)}`,
+    `github_pat_${'B'.repeat(40)}`,
+    'AKIAABCDEFGHIJKLMNOP',
+    `eyJ${'a'.repeat(12)}.${'b'.repeat(12)}.${'c'.repeat(12)}`,
+    `Bearer ${'z'.repeat(24)}`,
+    '-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----',
+    'https://x.test/cb?password=hunter2hunter2',
+  ];
+  for (const secret of secrets) {
+    const output = redact(`before ${secret} after`);
+    assert.match(output, /\[REDACTED\]/);
+    assert.doesNotMatch(output, /ghp_a|github_pat_B|AKIAABC|eyJaaa|zzzzzzzz|MIIabc|hunter2/);
+  }
+  assert.equal(
+    redact('plain text with a path /api/keys and code review'),
+    'plain text with a path /api/keys and code review',
+  );
+});

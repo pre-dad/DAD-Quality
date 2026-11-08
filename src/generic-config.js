@@ -19,7 +19,8 @@ import { RunError } from './core.js';
 // that establishes their fixture state. The adapter never fabricates credentials.
 
 const RELATIVE = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[\w./-]{1,200}$/;
-const HEALTH_PATH = /^\/[\w./?=&%-]{0,200}$/;
+// A single leading slash only: "//host" would resolve to another origin.
+const HEALTH_PATH = /^\/(?!\/)[\w./?=&%-]{0,199}$/;
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const COOKIE_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/;
 

@@ -66,7 +66,7 @@ named service's container port to a loopback port the agent explores.
 ### Command mode
 
 The adapter runs an optional build command, then a long-running start command
-that serves the application on a loopback port passed as `PORT`.
+that serves the application on a loopback port passed as `PORT`. The process runs with a minimal environment (`PATH`, `HOME`, `TMPDIR`, `PORT`), not the operator's credentials.
 
 ```json
 {

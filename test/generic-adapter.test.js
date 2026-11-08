@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -170,4 +170,31 @@ test('waitForHealth throws when the app never becomes ready', async t => {
   const result = { evidence: [] };
   await assert.rejects(adapter.deploy(result), /did not become ready/);
   assert.ok(result.evidence.some(e => e.path === 'evidence/readiness.log'));
+});
+
+test('the real start command gets a clean environment, PORT, and its whole process group is stopped', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-generic-start-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const out = path.join(root, 'env.json');
+  const script =
+    'const fs=require("node:fs");fs.writeFileSync(process.argv[1],JSON.stringify({port:process.env.PORT,secret:process.env.ATM_TEST_SECRET??null}));' +
+    'require("node:child_process").spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"ignore"}).unref();' +
+    'setInterval(()=>{},1000);';
+  const adapter = new GenericWebAdapter(
+    { dir: root, data: { id: 'run-x', candidate: {} }, evidence: async name => name },
+    { repo: root, revision: 'HEAD' },
+  );
+  adapter.config = { provision: { mode: 'command', start: [process.execPath, '-e', script, out] } };
+  adapter.source = root;
+  adapter.port = 4321;
+  process.env.ATM_TEST_SECRET = 'must-not-leak';
+  t.after(() => delete process.env.ATM_TEST_SECRET);
+  await adapter.startCommand();
+  for (let i = 0; i < 50 && !(await readFile(out, 'utf8').catch(() => '')); i++)
+    await new Promise(resolve => setTimeout(resolve, 100));
+  assert.deepEqual(JSON.parse(await readFile(out, 'utf8')), { port: '4321', secret: null });
+  const { pid } = adapter.process;
+  await adapter.cleanup({ evidence: [] });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.throws(() => process.kill(-pid, 0), { code: 'ESRCH' });
 });

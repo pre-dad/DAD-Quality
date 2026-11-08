@@ -215,7 +215,11 @@ export async function openDiscoveryBrowser({
     if (spec.action === 'probe') {
       let status = 0;
       let json;
-      const response = await target.request.get(spec.url, { timeout: 10000, failOnStatusCode: false });
+      const response = await target.request.get(spec.url, {
+        timeout: 10000,
+        failOnStatusCode: false,
+        maxRedirects: 0,
+      });
       status = response.status();
       const body = (await response.text()).slice(0, 20_000);
       try {
@@ -353,7 +357,7 @@ export async function openDiscoveryBrowser({
         // probe never mutates. Body is parsed as JSON when possible, size-bounded
         // and redacted; a non-JSON or oversized body leaves json undefined.
         const target = String(action.target ?? '');
-        if (!/^\/[\w./?=&%-]{0,400}$/.test(target))
+        if (!/^\/(?!\/)[\w./?=&%-]{0,399}$/.test(target))
           throw new Error('Probe target must be a loopback-relative path beginning with "/".');
         const url = new URL(target, origin);
         if (url.origin !== permitted.origin) throw new Error('Probe target is outside the permitted application.');

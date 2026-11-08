@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { command } from '../../process.js';
+import { cleanEnvironment, command } from '../../process.js';
 import { digest, RunError } from '../../core.js';
 import { ProvisioningAdapter } from '../base.js';
 import { loadGenericConfig } from '../../generic-config.js';
@@ -148,9 +148,9 @@ export class GenericWebAdapter extends ProvisioningAdapter {
     const [bin, ...args] = this.config.provision.start;
     this.process = spawn(bin, args, {
       cwd: this.workingDir(),
-      env: { ...process.env, PORT: String(this.port) },
+      env: cleanEnvironment({ PORT: String(this.port) }),
       stdio: 'ignore',
-      detached: false,
+      detached: process.platform !== 'win32',
     });
     this.process.on('error', () => {});
   }
@@ -189,11 +189,9 @@ export class GenericWebAdapter extends ProvisioningAdapter {
   async discoveryFixture() {
     if (this.config.seed) {
       if (this.config.provision.mode === 'compose')
-        await this.compose(['run', '--rm', '-T', this.config.provision.service, ...this.config.seed.slice(1)]).catch(
-          error => {
-            throw new RunError(`Seed command failed: ${error.message}`, 'failed');
-          },
-        );
+        await this.compose(['run', '--rm', '-T', this.config.provision.service, ...this.config.seed]).catch(error => {
+          throw new RunError(`Seed command failed: ${error.message}`, 'failed');
+        });
       else
         await command(this.config.seed[0], this.config.seed.slice(1), {
           cwd: this.workingDir(),
@@ -211,9 +209,12 @@ export class GenericWebAdapter extends ProvisioningAdapter {
   }
 
   async cleanup(result) {
-    if (this.process && !this.process.killed) {
+    if (this.process?.pid && this.process.exitCode === null) {
       try {
-        this.process.kill('SIGTERM');
+        // The start command is a process-group leader, so wrappers such as npm
+        // do not leave the actual server running after the run.
+        if (process.platform === 'win32') this.process.kill('SIGTERM');
+        else process.kill(-this.process.pid, 'SIGTERM');
       } catch {
         /* Process may already be gone. */
       }

@@ -96,6 +96,15 @@ test('healthPath must start with a slash', () => {
   assert.throws(() => validateGenericConfig(c), /healthPath/);
 });
 
+test('a protocol-relative healthPath or actor entry cannot leave the loopback origin', () => {
+  const c = composeConfig();
+  c.provision.healthPath = '//169.254.169.254/latest/meta-data/';
+  assert.throws(() => validateGenericConfig(c), /healthPath/);
+  const d = commandConfig();
+  d.actors[0].entry = '//example.com/';
+  assert.throws(() => validateGenericConfig(d), /entry must be a loopback-relative path/);
+});
+
 test('at least one anonymous actor is required', () => {
   const c = commandConfig();
   c.actors = [{ id: 'member', description: 'Signed-in member', entry: '/app', cookie: 'x', cookieName: 'session' }];
