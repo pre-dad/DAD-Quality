@@ -8,6 +8,9 @@ only adds what they do not say.
 - **[docs/discovery.md](docs/discovery.md)**, **[docs/generic-target.md](docs/generic-target.md)** —
   the discovery engine and the generic (codebase-agnostic) target + `atm.config.json`.
 - Cross-repo system docs live in the separate **DAD-Docs** repo.
+- **[Shared agent workflow](https://github.com/pre-dad/DAD-Docs/blob/dev/conventions/agent-workflow.md)** —
+  read DAD-Docs for skill setup, routing, and independent-review boundaries. Keep
+  shared procedures there; this guide owns repo-local commands and constraints.
 
 ## The gate (run before every push; CI runs the same)
 
