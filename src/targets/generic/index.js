@@ -7,6 +7,7 @@ import { ProvisioningAdapter } from '../base.js';
 import { loadGenericConfig } from '../../generic-config.js';
 
 const requiredFiles = ['atm.config.json'];
+const startOutputLimit = 64_000;
 
 // A container- or command-provisioned adapter for arbitrary web applications.
 // Unlike DadAdapter it compiles in no application knowledge: build/start/health
@@ -27,6 +28,8 @@ export class GenericWebAdapter extends ProvisioningAdapter {
     this.config = undefined;
     /** @type {import('node:child_process').ChildProcess | undefined} */
     this.process = undefined;
+    this.startOutput = '';
+    this.startError = undefined;
   }
 
   async snapshot(result) {
@@ -62,16 +65,7 @@ export class GenericWebAdapter extends ProvisioningAdapter {
     );
     this.port = await this.freePort();
     this.publicOrigin = `http://127.0.0.1:${this.port}`;
-    // The run-owned compose file maps the declared container port to the loopback
-    // port the browser explores. It references the target's committed compose file.
-    const generated = {
-      include: [path.join(this.source, this.config.provision.composeFile)],
-      services: {
-        [this.config.provision.service]: {
-          ports: [`127.0.0.1:${this.port}:${this.config.provision.port}`],
-        },
-      },
-    };
+    const generated = this.composeDefinition();
     await writeFile(this.file, JSON.stringify(generated, null, 2), { mode: 0o600 });
     this.run.data.environment = {
       docker: JSON.parse(resources.stdout),
@@ -80,6 +74,19 @@ export class GenericWebAdapter extends ProvisioningAdapter {
       composeSha256: digest(JSON.stringify(generated)),
     };
     return { summary: 'Docker ready; loopback port allocated and mapped to the declared service.' };
+  }
+
+  // The run-owned compose file maps the declared container port to the loopback
+  // port the browser explores. It references the target's committed compose file.
+  composeDefinition() {
+    return {
+      include: [path.join(this.source, this.config.provision.composeFile)],
+      services: {
+        [this.config.provision.service]: {
+          ports: [`127.0.0.1:${this.port}:${this.config.provision.port}`],
+        },
+      },
+    };
   }
 
   async build(result) {
@@ -135,7 +142,7 @@ export class GenericWebAdapter extends ProvisioningAdapter {
       this.run.data.environment = { publicOrigin: this.publicOrigin, mode: 'command' };
     }
     await this.waitForHealth(result);
-    return { summary: `Application reachable at the declared health path.` };
+    return { summary: 'Application reachable at the declared health path.' };
   }
 
   workingDir() {
@@ -149,10 +156,33 @@ export class GenericWebAdapter extends ProvisioningAdapter {
     this.process = spawn(bin, args, {
       cwd: this.workingDir(),
       env: cleanEnvironment({ PORT: String(this.port) }),
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });
-    this.process.on('error', () => {});
+    for (const stream of [this.process.stdout, this.process.stderr])
+      stream.on('data', chunk => {
+        if (this.startOutput.length < startOutputLimit) this.startOutput += chunk.toString('utf8');
+      });
+    this.process.on('error', error => {
+      this.startError = error.message;
+    });
+  }
+
+  startExited() {
+    return (
+      Boolean(this.startError) || (this.process && (this.process.exitCode !== null || this.process.signalCode !== null))
+    );
+  }
+
+  async startLog() {
+    const status = this.startError
+      ? `spawn error: ${this.startError}`
+      : this.process.exitCode !== null
+        ? `exited with code ${this.process.exitCode}`
+        : this.process.signalCode
+          ? `terminated by ${this.process.signalCode}`
+          : 'still running';
+    return this.run.evidence('start.log', `Start command ${status}.\n${this.startOutput.slice(0, startOutputLimit)}`);
   }
 
   // Overridable for tests: poll the health path until it responds, bounded by
@@ -177,9 +207,14 @@ export class GenericWebAdapter extends ProvisioningAdapter {
       } catch (error) {
         lastError = error.message;
       }
+      if (this.startExited()) {
+        lastError = `start command ended before the application answered (${lastError})`;
+        break;
+      }
       await new Promise(resolve => setTimeout(resolve, 500));
     }
     result.evidence.push(await this.run.evidence('readiness.log', `${url} never became ready: ${lastError}`));
+    if (this.process || this.startError) result.evidence.push(await this.startLog());
     throw new RunError(
       `Application did not become ready at ${this.config.provision.healthPath}: ${lastError}`,
       'failed',
@@ -209,16 +244,7 @@ export class GenericWebAdapter extends ProvisioningAdapter {
   }
 
   async cleanup(result) {
-    if (this.process?.pid && this.process.exitCode === null) {
-      try {
-        // The start command is a process-group leader, so wrappers such as npm
-        // do not leave the actual server running after the run.
-        if (process.platform === 'win32') this.process.kill('SIGTERM');
-        else process.kill(-this.process.pid, 'SIGTERM');
-      } catch {
-        /* Process may already be gone. */
-      }
-    }
+    if (this.process?.pid && this.process.exitCode === null) await this.stopGroup();
     if (this.config?.provision.mode === 'compose' && this.created) {
       try {
         const logs = await this.compose(['logs', '--no-color', '--tail', '150'], { timeout: 20_000 });
@@ -237,6 +263,32 @@ export class GenericWebAdapter extends ProvisioningAdapter {
         this.process ? 'Start command terminated.' : 'No application environment was created.',
       ),
     );
+    if (this.process) result.evidence.push(await this.startLog());
     return { summary: 'Run-owned processes stopped; evidence retained locally.' };
+  }
+
+  // The start command is a process-group leader, so wrappers such as npm do
+  // not leave the actual server running after the run.
+  async stopGroup() {
+    const { pid } = this.process;
+    const signalGroup = name => {
+      try {
+        if (process.platform === 'win32') this.process.kill(name);
+        else process.kill(-pid, name);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (!signalGroup('SIGTERM')) return;
+    if (process.platform === 'win32') return;
+    const gone = async limitMs => {
+      for (let waited = 0; waited < limitMs && signalGroup(0); waited += 50)
+        await new Promise(resolve => setTimeout(resolve, 50));
+      return !signalGroup(0);
+    };
+    if (await gone(2_000)) return;
+    signalGroup('SIGKILL');
+    await gone(1_000);
   }
 }

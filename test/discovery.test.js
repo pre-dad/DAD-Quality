@@ -10,6 +10,7 @@ import { validatePolicy } from '../src/policy.js';
 import { evaluateRelease } from '../src/release.js';
 import { Run } from '../src/core.js';
 import { collectFindings } from '../src/history.js';
+import { sourceReader } from '../src/source-reader.js';
 
 const signal = new AbortController().signal;
 const action = (kind, fields = {}) => ({
@@ -415,4 +416,16 @@ test('provider rejection usage is accounted and unknown usage stays explicit', a
     assert.equal(report.tokens, known ? 29 : 0);
     assert.equal(Boolean(report.usageIncomplete), !known);
   }
+});
+
+test('read_source returns a bounded excerpt of a line longer than the page budget and lets the reader advance', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-source-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'bundle.js'), `${'x'.repeat(20_000)}\nsecond line\n`);
+  const reader = await sourceReader(root);
+  const first = await reader.act({ action: 'read_source', target: 'bundle.js', value: '1' });
+  assert.equal(first.end, 1);
+  assert.ok(first.text.length > 0 && first.text.length <= 12_000);
+  const next = await reader.act({ action: 'read_source', target: 'bundle.js', value: String(first.end + 1) });
+  assert.match(next.text, /2: second line/);
 });

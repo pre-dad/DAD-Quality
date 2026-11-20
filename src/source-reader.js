@@ -89,7 +89,13 @@ export async function sourceReader(root) {
           end = start - 1;
         for (let i = start - 1; i < Math.min(lines.length, start + 99); i++) {
           const line = `${i + 1}: ${lines[i]}\n`;
-          if (text.length + line.length > 12_000) break;
+          if (text.length + line.length > 12_000) {
+            if (!text) {
+              text = line.slice(0, 12_000);
+              end = i + 1;
+            }
+            break;
+          }
           text += line;
           end = i + 1;
         }

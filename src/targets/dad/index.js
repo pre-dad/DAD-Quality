@@ -184,7 +184,7 @@ export class DadAdapter extends ProvisioningAdapter {
     ]);
     result.evidence.push(await this.run.evidence('readiness.log', stdout));
     const response = await fetch(this.publicOrigin, {
-      signal: AbortSignal.any([this.signal, AbortSignal.timeout(10_000)]),
+      signal: AbortSignal.any([this.signal, AbortSignal.timeout(10_000)].filter(Boolean)),
       redirect: 'manual',
     });
     if (response.status !== 200) throw new RunError(`Published ingress returned HTTP ${response.status}.`);
