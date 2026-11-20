@@ -16,6 +16,9 @@ test('runtime isolates database and disables external integrations', () => {
   assert.equal(config.services['test-postgres'].ports, undefined);
   assert.equal(config.services.web.ports, undefined);
   assert.deepEqual(config.services.ingress.ports, ['127.0.0.1:43123:8080']);
+  assert.deepEqual(config.services.ingress.security_opt, ['no-new-privileges:true']);
+  assert.deepEqual(config.services.ingress.cap_drop, ['ALL']);
+  assert.deepEqual(config.services.ingress.cap_add, ['CHOWN', 'SETGID', 'SETUID', 'NET_BIND_SERVICE']);
   for (const service of Object.values(config.services)) {
     assert.equal(service.env_file, undefined);
     assert.equal(service.environment?.STRIPE_SECRET_KEY, undefined);
