@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { verifyEvidence, RunError } from './core.js';
 import { hashPolicy } from './policy.js';
-import { validatePerformanceProfile } from './performance-config.js';
+import { defaultPerformanceProfile, validatePerformanceProfile } from './performance-config.js';
 
 const targets = [
   { name: 'spend', path: '/api/donor/public/spend', signedIn: false },
@@ -253,7 +253,9 @@ export function comparePerformance(current, baseline) {
       const regression =
         (m.p95Ms > before.p95Ms * r.p95Ratio && p95DeltaMs >= r.minP95IncreaseMs) ||
         (before.successfulThroughput > 0 && m.successfulThroughput < before.successfulThroughput * r.throughputRatio) ||
-        m.errorRate > before.errorRate;
+        (m.errorRate > before.errorRate &&
+          m.errorRate - before.errorRate >=
+            (r.errorRateIncrease ?? defaultPerformanceProfile.regression.errorRateIncrease));
       changes.push({
         phase: p.name,
         endpoint,

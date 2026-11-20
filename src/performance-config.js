@@ -11,14 +11,15 @@ export const defaultPerformanceProfile = {
     { name: 'recovery', durationMs: 10000, concurrency: 2 },
   ],
   criteria: { minRequests: 20, maxP95Ms: null, maxErrorRate: null },
-  regression: { p95Ratio: 1.5, minP95IncreaseMs: 20, throughputRatio: 0.75 },
+  regression: { p95Ratio: 1.5, minP95IncreaseMs: 20, throughputRatio: 0.75, errorRateIncrease: 0.01 },
 };
-const keys = (value, allowed) => {
+const keys = (value, allowed, optional = []) => {
   if (
     !value ||
     typeof value !== 'object' ||
     Array.isArray(value) ||
-    Object.keys(value).sort().join() !== [...allowed].sort().join()
+    Object.keys(value).some(k => !allowed.includes(k) && !optional.includes(k)) ||
+    allowed.some(k => !(k in value))
   )
     throw new Error('Invalid performance profile fields.');
 };
@@ -63,7 +64,7 @@ export function validatePerformanceProfile(profile) {
     !(maxErrorRate === null || (Number.isFinite(maxErrorRate) && maxErrorRate >= 0 && maxErrorRate <= 1))
   )
     throw new Error('Invalid performance acceptance criteria.');
-  keys(profile.regression, ['p95Ratio', 'minP95IncreaseMs', 'throughputRatio']);
+  keys(profile.regression, ['p95Ratio', 'minP95IncreaseMs', 'throughputRatio'], ['errorRateIncrease']);
   const r = profile.regression;
   if (
     !(
@@ -75,7 +76,9 @@ export function validatePerformanceProfile(profile) {
       r.minP95IncreaseMs <= 60000 &&
       Number.isFinite(r.throughputRatio) &&
       r.throughputRatio > 0 &&
-      r.throughputRatio < 1
+      r.throughputRatio < 1 &&
+      (r.errorRateIncrease === undefined ||
+        (Number.isFinite(r.errorRateIncrease) && r.errorRateIncrease >= 0 && r.errorRateIncrease <= 1))
     )
   )
     throw new Error('Invalid regression criteria.');
