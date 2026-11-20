@@ -39,6 +39,45 @@ test('parseComposePorts extracts published container ports across the common for
   );
 });
 
+test('parseComposePorts reads the container port from IP-bound, protocol and bare forms', () => {
+  const text = `services:
+  a:
+    ports:
+      - "127.0.0.1:8080:80"
+  b:
+    ports:
+      - 8080:81/tcp
+  c:
+    ports:
+      - 82
+  d:
+    ports: ["127.0.0.1:9000:83"]
+`;
+  assert.deepEqual(
+    parseComposePorts(text, 'compose.yaml').map(p => [p.service, p.container]),
+    [
+      ['a', 80],
+      ['b', 81],
+      ['c', 82],
+      ['d', 83],
+    ],
+  );
+});
+
+test('detect prefers an explicit port flag over a host:port elsewhere in the script', async t => {
+  const dir = await repo(t, {
+    'package.json': JSON.stringify({ scripts: { start: 'node --inspect=0.0.0.0:9229 server.js --port 4100' } }),
+  });
+  assert.equal((await detectConfig(dir)).provision.port, 4100);
+});
+
+test('detect treats 8081 as an ordinary application port', async t => {
+  const dir = await repo(t, {
+    'compose.yaml': 'services:\n  app:\n    build: .\n    ports:\n      - "8081:8081"\n',
+  });
+  assert.equal((await detectConfig(dir)).provision.port, 8081);
+});
+
 test('detect prefers a web-ish compose service and derives compose mode', async t => {
   const dir = await repo(t, {
     'compose.yaml': `services:

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { RunError } from './core.js';
 import { validateGenericConfig } from './generic-config.js';
@@ -20,7 +20,7 @@ const COMPOSE_FILES = ['compose.yaml', 'compose.yml', 'docker-compose.yml', 'doc
 const DATASTORE =
   /\b(postgres|postgresql|mysql|mariadb|redis|memcache|memcached|mongo|mongodb|rabbitmq|kafka|elasticsearch|opensearch|clickhouse|cassandra|minio|localstack|zookeeper|nats|etcd|mailpit|mailhog|maildev|adminer|pgadmin|phpmyadmin|redisinsight)\b/i;
 const DATASTORE_PORTS = new Set([
-  5432, 3306, 6379, 27017, 11211, 5672, 9092, 9200, 2181, 2379, 55432, 1025, 8025, 1143, 8081,
+  5432, 3306, 6379, 27017, 11211, 5672, 9092, 2181, 2379, 55432, 1025, 8025, 1143,
 ]);
 
 async function tryRead(dir, name) {
@@ -33,11 +33,22 @@ async function tryRead(dir, name) {
 
 async function exists(dir, name) {
   try {
-    await readFile(path.join(dir, name), 'utf8');
+    await access(path.join(dir, name));
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Container port of one compose port entry: `80`, `8080:80`, `127.0.0.1:8080:80`,
+ * `"8080:80/tcp"`. The container port is always the last segment.
+ * @param {string} entry
+ */
+function containerPort(entry) {
+  const spec = entry.trim().replace(/^["']|["']$/g, '').replace(/\/\w+$/, '');
+  const last = spec.split(':').pop() ?? '';
+  return /^\d{1,5}$/.test(last) ? Number(last) : null;
 }
 
 /**
@@ -57,7 +68,6 @@ export function parseComposePorts(text, file) {
   let serviceIndent = -1;
   let inPorts = false;
   let portsIndent = -1;
-  const mapping = /(?:"|')?(\d{1,5})\s*:\s*(\d{1,5})(?:"|')?/;
 
   const indentOf = l => l.length - l.trimStart().length;
 
@@ -94,8 +104,8 @@ export function parseComposePorts(text, file) {
     // Inline `ports: ["8080:80"]`
     const inline = /^ports\s*:\s*\[(.+)\]\s*$/.exec(trimmed);
     if (inline) {
-      const m = mapping.exec(inline[1]);
-      if (m) results.push({ service, container: Number(m[2]), file });
+      const container = containerPort(inline[1].split(',')[0]);
+      if (container) results.push({ service, container, file });
       continue;
     }
     if (/^ports\s*:\s*$/.test(trimmed)) {
@@ -107,8 +117,8 @@ export function parseComposePorts(text, file) {
       if (indent <= portsIndent && !trimmed.startsWith('-')) {
         inPorts = false;
       } else if (trimmed.startsWith('-')) {
-        const m = mapping.exec(trimmed);
-        if (m) results.push({ service, container: Number(m[2]), file });
+        const container = containerPort(trimmed.slice(1));
+        if (container) results.push({ service, container, file });
       }
     }
   }
@@ -143,10 +153,10 @@ function dockerfileExpose(text) {
 
 /** Find a port literal in a command string (e.g. "next start -p 4000", "runserver 0.0.0.0:8000"). */
 function portFromScript(script) {
-  const colon = /:(\d{2,5})\b/.exec(script);
-  if (colon) return Number(colon[1]);
   const flag = /(?:-p|--port|PORT=)\s*=?\s*(\d{2,5})\b/.exec(script);
-  return flag ? Number(flag[1]) : null;
+  if (flag) return Number(flag[1]);
+  const colon = /:(\d{2,5})\b/.exec(script);
+  return colon ? Number(colon[1]) : null;
 }
 
 /**
@@ -264,7 +274,7 @@ export async function detectConfig(repoDir) {
 
   throw new RunError(
     `Could not detect how to build and start this app. Looked for: ${
-      tried.length ? tried.join(', ') : 'compose, Dockerfile, package.json, manage.py, Procfile, config.ru'
+      tried.length ? tried.join(', ') : 'compose, package.json, manage.py, Procfile, config.ru'
     }. Write atm.config.json by hand — see docs/generic-target.md.`,
   );
 }
