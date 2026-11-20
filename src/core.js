@@ -87,7 +87,7 @@ export async function verifyEvidence(directory, run) {
   return issues;
 }
 
-const escapeHTML = value =>
+export const escapeHTML = value =>
   String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 export function reportHTML(run) {

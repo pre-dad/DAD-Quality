@@ -48,6 +48,7 @@ export async function discoveryMemory(root, runs, candidate) {
     .slice(0, 5)) {
     try {
       const report = await readDiscovery(root, prior);
+      if (!report) continue;
       memory.push({
         runId: prior.id,
         revision: prior.candidate.revision,

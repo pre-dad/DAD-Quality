@@ -190,6 +190,8 @@ test('triage persists across restarts and evidence route serves only listed regu
     200,
   );
   assert.equal((await fetch(`${app.origin}/evidence/${run.data.id}/compose.json`)).status, 404);
+  assert.equal((await fetch(`${app.origin}/api/runs/atm-00000000000000-00000000`)).status, 404);
+  assert.equal((await fetch(`${app.origin}/api/runs/not-a-run-id`)).status, 404);
   assert.equal((await fetch(`${app.origin}/evidence/${run.data.id}/api-tests.log`)).status, 200);
   const original = await readFile(path.join(run.dir, 'run.json'), 'utf8');
   await app.close();

@@ -5,15 +5,17 @@ import { readDiscovery } from './discovery-report.js';
 
 export const RUN_ID = /^atm-\d{14}-[a-f0-9]{8}$/;
 const statuses = new Set(['passed', 'failed', 'inconclusive', 'canceled']);
+const notFound = message => Object.assign(new Error(message), { status: 404 });
+
 export async function readRun(root, id) {
-  if (!RUN_ID.test(id)) throw new Error('Invalid run ID.');
+  if (!RUN_ID.test(id)) throw notFound('Invalid run ID.');
   const directory = path.join(root, id);
-  if (!(await lstat(directory)).isDirectory()) throw new Error('Invalid run directory.');
+  if (!(await lstat(directory)).isDirectory()) throw notFound('Invalid run directory.');
   const file = path.join(directory, 'run.json');
   if (!(await lstat(file)).isFile()) throw new Error('Invalid manifest.');
   const run = JSON.parse(await readFile(file, 'utf8'));
   if (run.id !== id || !Array.isArray(run.required) || !Array.isArray(run.results) || !run.startedAt)
-    throw new Error('Invalid run manifest.');
+    throw notFound('Invalid run manifest.');
   run.decision = run.canceledAt
     ? { status: 'canceled', eligible: false, reasons: ['Run canceled.'] }
     : evaluate(run.required, run.results);

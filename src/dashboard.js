@@ -434,7 +434,7 @@ export async function createDashboardServer(options) {
       }
       throw new HttpError(404, 'Not found.');
     } catch (error) {
-      json(response, error.status ?? (error.code === 'ENOENT' || /Invalid run/.test(error.message) ? 404 : 500), {
+      json(response, error.status ?? (error.code === 'ENOENT' ? 404 : 500), {
         error: redact(error.message),
       });
     }

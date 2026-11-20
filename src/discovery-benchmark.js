@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { escapeHTML } from './core.js';
 import { replayFixture } from './discovery-fixture.js';
 
 export const benchmarkFaults = ['healthy', 'lost-save', 'cross-actor', 'accept-invalid', 'duplicate-write'];
@@ -16,8 +17,6 @@ export function saveProfile(actor, name, profiles) {
   return { status: 200 };
 }
 `;
-const escapeHTML = value =>
-  String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export async function benchmarkApplication(fault = 'healthy') {
   if (!benchmarkFaults.includes(fault)) throw new Error('Unknown benchmark fault.');
   const seed = () => ({
