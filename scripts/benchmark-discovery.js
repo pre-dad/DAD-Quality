@@ -15,28 +15,43 @@ import { sourceReader } from '../src/source-reader.js';
 import { discoveryProvider, discover, discoveryLimits, discoveryInstructions } from '../src/discovery.js';
 import { openDiscoveryBrowser } from '../src/discovery-browser.js';
 
-const { values } = parseArgs({
-  options: {
-    live: { type: 'boolean' },
-    help: { type: 'boolean' },
-    model: { type: 'string' },
-    provider: { type: 'string' },
-    'max-requests': { type: 'string', default: '40' },
-    repeats: { type: 'string', default: '1' },
-    output: { type: 'string', default: '.atm/benchmarks' },
-    'token-price': { type: 'string' },
-  },
-});
+function usageError(message) {
+  console.error(message);
+  process.exit(2);
+}
+
+let values;
+try {
+  ({ values } = parseArgs({
+    options: {
+      live: { type: 'boolean' },
+      help: { type: 'boolean' },
+      model: { type: 'string' },
+      provider: { type: 'string' },
+      'max-requests': { type: 'string', default: '40' },
+      repeats: { type: 'string', default: '1' },
+      output: { type: 'string', default: '.atm/benchmarks' },
+      'token-price': { type: 'string' },
+    },
+  }));
+} catch (error) {
+  usageError(error.message);
+}
 if (values.help) {
   console.log(
-    'Usage: npm run benchmark:discovery -- --live --model MODEL [--repeats 1..5] [--max-requests 1..40] [--output DIR] [--token-price USD_PER_MILLION_TOTAL_TOKENS]\nRuns five blinded application variants through the real model. Requires the selected provider API key (ATM_PROVIDER or --provider openai|tinker). Token price is an optional blended estimate supplied by you.',
+    `Usage: npm run benchmark:discovery -- --live --model MODEL [--repeats 1..5] [--max-requests 1..${discoveryLimits.requests}] [--output DIR] [--token-price USD_PER_MILLION_TOTAL_TOKENS]\nRuns five blinded application variants through the real model. Requires the selected provider API key (ATM_PROVIDER or --provider openai|tinker). Token price is an optional blended estimate supplied by you.`,
   );
 } else {
   const model = values.model ?? process.env.ATM_MODEL,
     repeats = Number(values.repeats),
     price = values['token-price'] === undefined ? null : Number(values['token-price']);
-  if (!values.live) throw new Error('Benchmark requires --live.');
-  const config = requireModelConfig({ providerName: values.provider, model });
+  if (!values.live) usageError('Benchmark requires --live.');
+  let config;
+  try {
+    config = requireModelConfig({ providerName: values.provider, model });
+  } catch (error) {
+    usageError(error.message);
+  }
   const decide = discoveryProvider(config);
   if (
     !Number.isInteger(repeats) ||
@@ -44,10 +59,10 @@ if (values.help) {
     repeats > 5 ||
     (price !== null && (!Number.isFinite(price) || price < 0))
   )
-    throw new Error('Invalid repetitions or token price.');
+    usageError('Invalid repetitions or token price.');
   const maxRequests = Number(values['max-requests']);
   if (!Number.isInteger(maxRequests) || maxRequests < 1 || maxRequests > discoveryLimits.requests)
-    throw new Error('Benchmark request limit must be 1–40.');
+    usageError(`Benchmark request limit must be 1–${discoveryLimits.requests}.`);
   const directory = path.resolve(values.output, `benchmark-${Date.now()}`);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const cases = [],
