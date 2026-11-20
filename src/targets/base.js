@@ -122,10 +122,14 @@ export class ProvisioningAdapter {
       signal: this.signal,
     });
     await command('tar', ['-xf', archive, '-C', this.source], { signal: this.signal });
-    const changes = await command('git', ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '-z', revision], {
-      cwd: this.repo,
-      signal: this.signal,
-    });
+    const changes = await command(
+      'git',
+      ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '-z', revision],
+      {
+        cwd: this.repo,
+        signal: this.signal,
+      },
+    );
     const worktree = await command('git', ['status', '--porcelain'], { cwd: this.repo, signal: this.signal });
     this.run.data.candidate = {
       revision,

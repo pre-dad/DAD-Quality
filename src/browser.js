@@ -34,52 +34,57 @@ export async function openBrowser(origins, { readOnly = false, signal } = {}) {
   } catch (error) {
     throw new RunError(`Chromium unavailable: ${error.message}`);
   }
-  const context = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false });
-  context.setDefaultTimeout(15_000);
-  const blocked = [];
-  await context.route('**/*', route => {
-    const request = route.request();
-    if (allowedRequest(request.url(), request.method(), origins, readOnly)) return route.continue();
-    blocked.push({ url: new URL(request.url()).origin, method: request.method() });
-    return route.abort('blockedbyclient');
-  });
-  await context.routeWebSocket('**/*', socket => socket.close());
-  const newPage = async () => {
-    const page = await context.newPage();
-    // Playwright routing sees only the first request of a redirect chain. CDP
-    // Fetch pauses every hop, before it leaves Chromium, including subresources.
-    const cdp = await context.newCDPSession(page);
-    cdp.on('Fetch.requestPaused', async event => {
-      try {
-        if (allowedRequest(event.request.url, event.request.method, origins, readOnly)) {
-          await cdp.send('Fetch.continueRequest', { requestId: event.requestId });
-        } else {
-          blocked.push({ url: new URL(event.request.url).origin, method: event.request.method });
-          await cdp.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' });
+  try {
+    const context = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false });
+    context.setDefaultTimeout(15_000);
+    const blocked = [];
+    await context.route('**/*', route => {
+      const request = route.request();
+      if (allowedRequest(request.url(), request.method(), origins, readOnly)) return route.continue();
+      blocked.push({ url: new URL(request.url()).origin, method: request.method() });
+      return route.abort('blockedbyclient');
+    });
+    await context.routeWebSocket('**/*', socket => socket.close());
+    const newPage = async () => {
+      const page = await context.newPage();
+      // Playwright routing sees only the first request of a redirect chain. CDP
+      // Fetch pauses every hop, before it leaves Chromium, including subresources.
+      const cdp = await context.newCDPSession(page);
+      cdp.on('Fetch.requestPaused', async event => {
+        try {
+          if (allowedRequest(event.request.url, event.request.method, origins, readOnly)) {
+            await cdp.send('Fetch.continueRequest', { requestId: event.requestId });
+          } else {
+            blocked.push({ url: new URL(event.request.url).origin, method: event.request.method });
+            await cdp.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' });
+          }
+        } catch {
+          /* A closed page cancels its paused requests. */
         }
-      } catch {
-        /* A closed page cancels its paused requests. */
-      }
-    });
-    await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
-    page.on('popup', popup => {
-      void popup.close().catch(() => {});
-    });
-    return page;
-  };
-  const abort = () => {
-    void browser.close().catch(() => {});
-  };
-  signal?.addEventListener('abort', abort, { once: true });
-  if (signal?.aborted) {
-    await browser.close();
-    throw new RunError('Run canceled.', 'canceled');
+      });
+      await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+      page.on('popup', popup => {
+        void popup.close().catch(() => {});
+      });
+      return page;
+    };
+    const abort = () => {
+      void browser.close().catch(() => {});
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) {
+      await browser.close();
+      throw new RunError('Run canceled.', 'canceled');
+    }
+    const close = async () => {
+      signal?.removeEventListener('abort', abort);
+      await browser.close();
+    };
+    return { browser, context, blocked, close, newPage };
+  } catch (error) {
+    await browser.close().catch(() => {});
+    throw error;
   }
-  const close = async () => {
-    signal?.removeEventListener('abort', abort);
-    await browser.close();
-  };
-  return { browser, context, blocked, close, newPage };
 }
 
 async function expectStatus(page, url, status) {
@@ -97,14 +102,33 @@ function journeyError(error, adapter, signal, label) {
   return new RunError(error.message, 'failed');
 }
 
+/**
+ * Retain trace/screenshot evidence in a `finally`. When the journey already
+ * failed, a capture error is recorded as evidence instead of replacing that failure.
+ * @param {any} adapter
+ * @param {any} result
+ * @param {string} label
+ * @param {boolean} failed
+ * @param {() => Promise<unknown>} capture
+ */
+export async function retainEvidence(adapter, result, label, failed, capture) {
+  try {
+    await capture();
+  } catch (error) {
+    if (!failed) throw error;
+    result.evidence.push(await adapter.run.evidence(`${label}-capture-error.txt`, String(error.message)));
+  }
+}
+
 export async function staffJourney(adapter, result) {
   const signal = AbortSignal.any([adapter.signal, AbortSignal.timeout(180_000)]);
   const session = await openBrowser([adapter.publicOrigin, adapter.staffOrigin], { signal });
-  const page = await session.newPage();
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await session.context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+  let failed = false;
   try {
+    const page = await session.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await session.context.tracing.start({ screenshots: true, snapshots: true, sources: false });
     const device = await session.context.newCDPSession(page);
     await device.send('WebAuthn.enable');
     await device.send('WebAuthn.addVirtualAuthenticator', {
@@ -148,11 +172,14 @@ export async function staffJourney(adapter, result) {
         'Passkey activation, logout/login, persisted credentials and session revocation, invitation replay rejection, and public/staff host boundaries verified.',
     };
   } catch (error) {
+    failed = true;
     throw journeyError(error, adapter, signal, 'Staff journey');
   } finally {
     try {
-      await session.context.tracing.stop({ path: path.join(adapter.run.dir, 'evidence/staff-trace.zip') });
-      result.evidence.push(await adapter.run.reference('evidence/staff-trace.zip'));
+      await retainEvidence(adapter, result, 'staff-trace', failed, async () => {
+        await session.context.tracing.stop({ path: path.join(adapter.run.dir, 'evidence/staff-trace.zip') });
+        result.evidence.push(await adapter.run.reference('evidence/staff-trace.zip'));
+      });
     } finally {
       await session.close();
     }
@@ -162,12 +189,13 @@ export async function staffJourney(adapter, result) {
 export async function donorClaimJourney(adapter, result) {
   const signal = AbortSignal.any([adapter.signal, AbortSignal.timeout(180_000)]);
   const session = await openBrowser([adapter.publicOrigin], { signal });
-  const page = await session.newPage();
-  const errors = [],
-    verification = {};
-  page.on('pageerror', error => errors.push(error.message));
-  await session.context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+  const verification = {};
+  let failed = false;
   try {
+    const page = await session.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await session.context.tracing.start({ screenshots: true, snapshots: true, sources: false });
     const fixture = await adapter.donorFixture();
     await expectStatus(page, `${adapter.publicOrigin}/api/donor/me/dashboard`, 401);
     await page.goto(fixture.links[0]);
@@ -215,14 +243,17 @@ export async function donorClaimJourney(adapter, result) {
         'Donor claim, authenticated reload, persisted link consumption, logout revocation, replay and sibling-link rejection verified; unrelated donor unchanged.',
     };
   } catch (error) {
+    failed = true;
     throw journeyError(error, adapter, signal, 'Donor claim journey');
   } finally {
     try {
-      result.evidence.push(
-        await adapter.run.evidence('donor-verification.json', JSON.stringify(verification, null, 2)),
-      );
-      await session.context.tracing.stop({ path: path.join(adapter.run.dir, 'evidence/donor-trace.zip') });
-      result.evidence.push(await adapter.run.reference('evidence/donor-trace.zip'));
+      await retainEvidence(adapter, result, 'donor-trace', failed, async () => {
+        result.evidence.push(
+          await adapter.run.evidence('donor-verification.json', JSON.stringify(verification, null, 2)),
+        );
+        await session.context.tracing.stop({ path: path.join(adapter.run.dir, 'evidence/donor-trace.zip') });
+        result.evidence.push(await adapter.run.reference('evidence/donor-trace.zip'));
+      });
     } finally {
       await session.close();
     }

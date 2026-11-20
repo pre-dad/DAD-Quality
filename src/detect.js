@@ -19,9 +19,7 @@ const COMPOSE_FILES = ['compose.yaml', 'compose.yml', 'docker-compose.yml', 'doc
 // database/cache/broker as the web entrypoint.
 const DATASTORE =
   /\b(postgres|postgresql|mysql|mariadb|redis|memcache|memcached|mongo|mongodb|rabbitmq|kafka|elasticsearch|opensearch|clickhouse|cassandra|minio|localstack|zookeeper|nats|etcd|mailpit|mailhog|maildev|adminer|pgadmin|phpmyadmin|redisinsight)\b/i;
-const DATASTORE_PORTS = new Set([
-  5432, 3306, 6379, 27017, 11211, 5672, 9092, 2181, 2379, 55432, 1025, 8025, 1143,
-]);
+const DATASTORE_PORTS = new Set([5432, 3306, 6379, 27017, 11211, 5672, 9092, 2181, 2379, 55432, 1025, 8025, 1143]);
 
 async function tryRead(dir, name) {
   try {
@@ -46,7 +44,10 @@ async function exists(dir, name) {
  * @param {string} entry
  */
 function containerPort(entry) {
-  const spec = entry.trim().replace(/^["']|["']$/g, '').replace(/\/\w+$/, '');
+  const spec = entry
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/\/\w+$/, '');
   const last = spec.split(':').pop() ?? '';
   return /^\d{1,5}$/.test(last) ? Number(last) : null;
 }
