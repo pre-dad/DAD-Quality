@@ -73,6 +73,32 @@ const fakeBrowser = () => ({
   reproduce: async () => ({ status: 'reproduced', observation }),
 });
 
+test('a duplicate report is not replayed and is reported as already reported', async () => {
+  let reproductions = 0;
+  const decisions = [
+    action('investigate', { title: 'Understand the home page' }),
+    action('report', { title: 'Missing welcome', expectation: 'text_absent', text: 'Welcome' }),
+    action('report', { title: 'Missing welcome', expectation: 'text_absent', text: 'Welcome' }),
+    action('finish'),
+  ];
+  const report = blank();
+  await discover({
+    provider: async () => ({ action: decisions.shift(), tokens: 20 }),
+    browser: {
+      ...fakeBrowser(),
+      reproduce: async () => {
+        reproductions++;
+        return { status: 'reproduced', observation };
+      },
+    },
+    report,
+    signal,
+  });
+  assert.equal(reproductions, 1);
+  assert.equal(report.findings.length, 1);
+  assert.ok(report.events.some(e => e.outcome === 'Already reported.'));
+});
+
 test('discovery chooses goals through decisions, rejects unsupported reports and never treats finish as release approval', async () => {
   const decisions = [
     action('finish'),
