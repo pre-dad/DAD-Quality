@@ -17,7 +17,7 @@ import {
 const REPO = 'pre-dad/DAD-Main';
 const SOURCE = `github:${REPO}`;
 const SHA = 'a'.repeat(40);
-const BUCKET = 'atm-evidence-staging-853377042897';
+const BUCKET = 'atm-evidence-test';
 const TABLE = 'atm-findings-staging';
 
 // Build a finished run on disk with one failing check carrying a .log evidence

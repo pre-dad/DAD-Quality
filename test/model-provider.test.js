@@ -242,7 +242,6 @@ test('Tinker backfills missing schema string fields so strict validation passes'
   // schema-declared string fields were omitted by the model.
   reply.content[1].input = { action: 'finish', reason: 'No app connected.', value: '', target: '' };
   const result = await provider(reply)(input);
-  // After backfilling, every declared key is present with '' where not supplied.
   assert.deepEqual(result.action, {
     action: 'finish',
     target: '',

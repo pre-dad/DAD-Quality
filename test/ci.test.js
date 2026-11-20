@@ -24,6 +24,7 @@ const keys = generateKeyPairSync('rsa', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
 });
+const checkResult = (run, id) => run.results.find(r => r.id === id);
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'atm-ci-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -106,7 +107,7 @@ test('encrypted evidence rejects corruption and the wrong recipient', async t =>
 
 test('failed runs persist findings; a later pass cannot erase them', async t => {
   const { run, prepare, publish } = await fixture(t);
-  run.data.results[4].status = 'failed';
+  checkResult(run.data, 'api-tests').status = 'failed';
   await run.save();
   const failed = await prepare();
   assert.equal(failed.proposal.eligible, false);
@@ -114,7 +115,7 @@ test('failed runs persist findings; a later pass cannot erase them', async t => 
   assert.equal(ledger.findings.length, 1);
   assert.equal(ledger.findings[0].severity, 'unassessed');
   assert.equal('title' in ledger.findings[0], false);
-  run.data.results[4].status = 'passed';
+  checkResult(run.data, 'api-tests').status = 'passed';
   await run.save();
   const passing = await prepare(ledger);
   assert.equal(passing.proposal.eligible, false);
@@ -159,7 +160,7 @@ test('publisher rejects stale state, wrong candidate, replay, missing receipt an
 
 test('invalid history fails closed, including malformed closure and duplicate findings', async t => {
   const { run, prepare, publish } = await fixture(t);
-  run.data.results[4].status = 'failed';
+  checkResult(run.data, 'api-tests').status = 'failed';
   await run.save();
   const ledger = publish(await prepare());
   for (const change of [
@@ -193,7 +194,7 @@ test('invalid history fails closed, including malformed closure and duplicate fi
 
 test('resolved and dismissed findings reopen on recurrence while retries are idempotent', async t => {
   const { run, prepare, publish } = await fixture(t);
-  run.data.results[4].status = 'failed';
+  checkResult(run.data, 'api-tests').status = 'failed';
   await run.save();
   const ledger = publish(await prepare());
   for (const disposition of ['resolved', 'dismissed']) {
@@ -217,7 +218,7 @@ test('resolved and dismissed findings reopen on recurrence while retries are ide
 
 test('worker proposals cannot discard historical findings or change their severity', async t => {
   const { run, prepare, publish } = await fixture(t);
-  run.data.results[4].status = 'failed';
+  checkResult(run.data, 'api-tests').status = 'failed';
   await run.save();
   const ledger = publish(await prepare());
   const next = await prepare(ledger);

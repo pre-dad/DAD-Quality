@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, readFile, mkdir } from 'node:fs/promises';
-import os from 'node:os';
+import { rm, writeFile, readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { Run, atomicJSON } from '../src/core.js';
 import { loadPolicy, hashPolicy, validatePolicy } from '../src/policy.js';
@@ -10,77 +9,78 @@ import { evaluateRelease, assessRelease } from '../src/release.js';
 import { Dashboard } from '../src/dashboard.js';
 import { main } from '../src/cli.js';
 import { collectFindings, listRuns } from '../src/history.js';
+import { syntheticRun } from './synthetic-run.js';
 
-async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-policy-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const policy = await loadPolicy();
-  const run = await Run.create(
-    root,
-    { adapter: 'impactgraph' },
-    policy.definition.checks.filter(c => c.required).map(c => c.id),
-    policy,
-  );
-  run.data.candidate = {
-    revision: 'a'.repeat(40),
-    source: '/synthetic/DAD-Main',
-    sourceArchiveSha256: 'b'.repeat(64),
-    images: { api: `sha256:${'c'.repeat(64)}`, web: `sha256:${'d'.repeat(64)}` },
-  };
-  for (const check of policy.definition.checks) {
-    const evidence = [];
-    for (const name of check.evidence) evidence.push(await run.evidence(name, `Synthetic ${name}`));
-    run.data.results.push({
-      id: check.id,
-      required: check.required,
-      status: 'passed',
-      summary: 'Synthetic pass',
-      startedAt: run.data.startedAt,
-      finishedAt: run.data.startedAt,
-      evidence,
-    });
-  }
-  await run.finish();
-  return { root, run, policy };
-}
+const fixture = t =>
+  syntheticRun(t, { prefix: 'atm-policy-', options: { adapter: 'impactgraph' }, source: '/synthetic/DAD-Main' });
 
 test('policy rejects unsupported handlers, weakened contracts, duplicate checks and exception overrides', async () => {
   const { definition } = await loadPolicy();
-  for (const mutate of [
-    p => {
-      p.checks[0].id = 'shell';
-    },
-    p => {
-      p.checks[0].evidence = [];
-    },
-    p => {
-      p.checks.push(p.checks[0]);
-    },
-    p => {
-      p.checks[0].required = false;
-    },
-    p => {
-      p.checks[0].timeoutMs = -1;
-    },
-    p => {
-      p.checks.find(c => c.scenario).scenario.version = 999;
-    },
-    p => {
-      p.exceptions.mode = 'allow';
-    },
-    p => {
-      p.findings.blockingSeverities = ['high'];
-    },
-    p => {
-      p.scope = 'production';
-    },
-    p => {
-      p.checks[0].command = 'arbitrary';
-    },
+  for (const [mutate, message] of [
+    [
+      p => {
+        p.checks[0].id = 'shell';
+      },
+      /Unsupported check or timeout/,
+    ],
+    [
+      p => {
+        p.checks[0].evidence = [];
+      },
+      /Missing or invalid evidence contract: snapshot/,
+    ],
+    [
+      p => {
+        p.checks.push(p.checks[0]);
+      },
+      /nonempty and unique/,
+    ],
+    [
+      p => {
+        p.checks[0].required = false;
+      },
+      /Required foundation check missing: snapshot/,
+    ],
+    [
+      p => {
+        p.checks[0].timeoutMs = -1;
+      },
+      /Unsupported check or timeout/,
+    ],
+    [
+      p => {
+        p.checks.find(c => c.scenario).scenario.version = 999;
+      },
+      /Unsupported scenario version: staff-journey/,
+    ],
+    [
+      p => {
+        p.exceptions.mode = 'allow';
+      },
+      /Release exceptions are not supported/,
+    ],
+    [
+      p => {
+        p.findings.blockingSeverities = ['high'];
+      },
+      /Invalid blocking severities/,
+    ],
+    [
+      p => {
+        p.scope = 'production';
+      },
+      /Unsupported policy identity, version, adapter or scope/,
+    ],
+    [
+      p => {
+        p.checks[0].command = 'arbitrary';
+      },
+      /Invalid or unsupported policy fields/,
+    ],
   ]) {
     const value = structuredClone(definition);
     mutate(value);
-    assert.throws(() => validatePolicy(value));
+    assert.throws(() => validatePolicy(value), message);
   }
 });
 
@@ -115,38 +115,70 @@ test('completed passing policy is eligible locally and assessments are reproduci
 
 test('incomplete, canceled, forged policy and missing result evidence cannot authorize acceptance', async t => {
   const { run } = await fixture(t);
-  for (const mutate of [
-    r => {
-      delete r.finishedAt;
-    },
-    r => {
-      r.canceledAt = r.startedAt;
-    },
-    r => {
-      r.policy.definition.version = '9.0.0';
-    },
-    r => {
-      r.required.pop();
-    },
-    r => {
-      r.results[0].evidence = [];
-    },
-    r => {
-      delete r.results[0].finishedAt;
-    },
-    r => {
-      r.results.push(r.results[0]);
-    },
-    r => {
-      r.candidate.images = {};
-    },
-    r => {
-      r.policy = { version: 1 };
-    },
+  for (const [mutate, reason] of [
+    [
+      r => {
+        delete r.finishedAt;
+      },
+      'Run is incomplete.',
+    ],
+    [
+      r => {
+        r.canceledAt = r.startedAt;
+      },
+      'Run was canceled.',
+    ],
+    [
+      r => {
+        r.policy.definition.version = '9.0.0';
+      },
+      'Policy snapshot hash mismatch',
+    ],
+    [
+      r => {
+        r.required.pop();
+      },
+      'Required checks differ from the recorded policy',
+    ],
+    [
+      r => {
+        r.results[0].evidence = [];
+      },
+      'snapshot: required evidence missing or duplicated: candidate.json',
+    ],
+    [
+      r => {
+        delete r.results[0].finishedAt;
+      },
+      'snapshot: no completion record.',
+    ],
+    [
+      r => {
+        r.results.push(r.results[0]);
+      },
+      'snapshot: Missing, duplicate, or invalid result.',
+    ],
+    [
+      r => {
+        r.candidate.images = {};
+      },
+      'Built application image identities are missing.',
+    ],
+    [
+      r => {
+        r.policy = { version: 1 };
+      },
+      'Invalid or unsupported policy fields',
+    ],
   ]) {
     const candidate = structuredClone(run.data);
     mutate(candidate);
-    assert.equal(evaluateRelease(candidate).eligible, false);
+    const assessment = evaluateRelease(candidate);
+    assert.equal(assessment.eligible, false);
+    assert.ok(
+      assessment.reasons.some(r => r.includes(reason)),
+      `${reason} not in ${JSON.stringify(assessment.reasons)}`,
+    );
   }
 });
 

@@ -105,6 +105,8 @@ test('contracts reject duplicate IDs, forward checkpoints, unsafe deltas, assert
     assert.throws(() => validateContract(checks));
 });
 
+const outcomeOf = (report, kind, nth) => report.events.filter(e => e.action.action === kind)[nth]?.outcome;
+
 test('a passing unrelated assertion and an early reload cannot satisfy the declared save/reload/persist contract', async () => {
   const report = await run([
     investigate([requiredAction('save', 'click', 'Save'), requiredAction('reload'), requiredAssertion('persist')]),
@@ -119,9 +121,9 @@ test('a passing unrelated assertion and an early reload cannot satisfy the decla
     action('conclude', { value: 'supported' }),
     action('finish'),
   ]);
-  assert.match(report.events[3].outcome, /all declared/);
-  assert.match(report.events[4].outcome, /next declared/);
-  assert.match(report.events[6].outcome, /all declared/);
+  assert.match(outcomeOf(report, 'conclude', 0), /all declared/);
+  assert.match(outcomeOf(report, 'verify', 0), /next declared/);
+  assert.match(outcomeOf(report, 'conclude', 1), /all declared/);
   assert.equal(report.status, 'completed');
   assert.deepEqual(
     report.investigations[0].progress.map(c => c.checkId),
@@ -185,9 +187,9 @@ test('supplemental failures cannot refute a different declared requirement and m
     ],
     { observe: () => observation({ state: {} }) },
   );
-  assert.match(report.events[3].outcome, /failed declared/);
-  assert.match(report.events[4].outcome, /unavailable/);
-  assert.match(report.events[5].outcome, /all declared/);
+  assert.match(outcomeOf(report, 'conclude', 0), /failed declared/);
+  assert.match(outcomeOf(report, 'verify', 0), /unavailable/);
+  assert.match(outcomeOf(report, 'conclude', 1), /all declared/);
   assert.equal(report.investigations[0].progress.length, 1);
 });
 
@@ -222,7 +224,7 @@ test('checkpoint evidence is immutable and cannot be recaptured to hide a change
     },
   );
   assert.equal(report.checkpoints.length, 1);
-  assert.match(report.events[3].outcome, /next declared checkpoint/);
+  assert.match(outcomeOf(report, 'checkpoint', 1), /next declared checkpoint/);
   const verified = report.assertions[0].verification;
   assert.equal(verified.before, 'before');
   assert.equal(verified.actual, 'after');
@@ -341,7 +343,7 @@ test('repeated attempts to replace an unfinished plan also stop without discardi
   assert.equal(report.investigations[0].conclusion, undefined);
 });
 
-// Phase 5a: accessibility is a first-class discovery expectation.
+// Accessibility is a first-class discovery expectation.
 test('a11y_clean passes with no violations, fails with violations, and is inconclusive without an audit', () => {
   const check = action('assert', { expectation: 'a11y_clean' });
   // No violations captured -> passes.
@@ -366,7 +368,7 @@ test('a contract may declare an a11y_clean assertion with empty target/value/tex
   assert.doesNotThrow(() => validateContract(checks));
 });
 
-// Phase 5b: API-level probing — response_status and json_has over a probe response.
+// API-level probing — response_status and json_has over a probe response.
 test('response_status evaluates the captured probe status', () => {
   const check = action('assert', { expectation: 'response_status', text: '200' });
   assert.equal(evaluateExpectation(check, observation({ response: { status: 200 } })).passed, true);

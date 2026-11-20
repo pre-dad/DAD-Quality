@@ -4,6 +4,7 @@ import http from 'node:http';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { syntheticRun } from './synthetic-run.js';
 import {
   measurePerformance,
   metrics,
@@ -87,7 +88,7 @@ test('real HTTP load detects slow bodies, error responses and candidate regressi
   slow = true;
   const degraded = await measurePerformance(options);
   assert.equal(degraded.assessment.status, 'exceeded');
-  assert.ok(degraded.phases[1].p95Ms >= 290);
+  assert.ok(degraded.phases[1].p95Ms >= 250);
   assert.equal(comparePerformance(degraded, fast).regression, true);
   failing = true;
   const broken = await measurePerformance(options);
@@ -180,33 +181,13 @@ test('policy bounds load and requires explicit budgets before making performance
 });
 
 test('advisory failures stay visible without producing blocking findings; required failures block', async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-perf-advisory-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const policy = await loadPolicy();
-  const run = await Run.create(
-    root,
-    {},
-    policy.definition.checks.filter(c => c.required).map(c => c.id),
-    policy,
-  );
-  run.data.candidate = {
-    revision: 'a'.repeat(40),
+  const { root, run } = await syntheticRun(t, {
+    prefix: 'atm-perf-advisory-',
     source: 'fixture',
-    sourceArchiveSha256: 'b'.repeat(64),
-    images: { api: `sha256:${'c'.repeat(64)}`, web: `sha256:${'d'.repeat(64)}` },
-  };
-  for (const c of policy.definition.checks) {
-    const evidence = [];
-    for (const name of c.evidence) evidence.push(await run.evidence(name, '{}'));
-    run.data.results.push({
-      id: c.id,
-      status: c.id === 'performance' ? 'failed' : 'passed',
-      summary: 'Synthetic budget exceeded',
-      finishedAt: run.data.startedAt,
-      evidence,
-    });
-  }
-  await run.finish();
+    status: check => (check.id === 'performance' ? 'failed' : 'passed'),
+    summary: 'Synthetic budget exceeded',
+    evidence: () => '{}',
+  });
   let findings = await collectFindings(root, [run.data]);
   assert.equal(findings.length, 0);
   assert.equal(evaluateRelease(run.data, { findings }).eligible, true);

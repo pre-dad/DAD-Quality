@@ -1,16 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import { Run, RunError } from '../src/core.js';
 import { createDashboardServer } from '../src/dashboard.js';
-import { loadPolicy } from '../src/policy.js';
-import { writeFile } from 'node:fs/promises';
+import { loadPolicy, hashPolicy } from '../src/policy.js';
 import { metrics, assessPerformance } from '../src/performance.js';
-import { hashPolicy } from '../src/policy.js';
 
 test('dashboard supports run inspection, triage, launch, cancellation and mobile layout', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'atm-ui-'));
@@ -91,10 +89,11 @@ test('dashboard supports run inspection, triage, launch, cancellation and mobile
   await page.getByRole('button', { name: 'Turn off commit watch' }).click();
   await page.getByRole('button', { name: 'Run validation' }).click();
   await page.getByLabel('Commit, branch, or tag').fill('main');
+  const detailResponse = page.waitForResponse(response => /\/api\/runs\/atm-/.test(response.url()));
   await page.getByRole('button', { name: 'Start validation' }).click();
   const cancelButton = await page.getByRole('button', { name: 'Cancel validation' }).elementHandle();
   await cancelButton.focus();
-  await page.waitForResponse(response => /\/api\/runs\/atm-/.test(response.url()));
+  await detailResponse;
   await page.evaluate(() => new Promise(requestAnimationFrame));
   assert.equal(
     await cancelButton.evaluate(button => button.isConnected && document.activeElement === button),
@@ -270,8 +269,8 @@ test('performance view compares candidates, remains accessible on mobile and rej
     /baseline\/overall: p95 \+80\.0 ms/,
   );
   assert.equal(await page.getByRole('columnheader', { name: 'p99 ms' }).count(), 1);
-  await mkdir('.atm/ui', { recursive: true });
-  await page.screenshot({ path: '.atm/ui/performance-desktop.png', fullPage: true });
+  await mkdir(path.join(root, 'ui'), { recursive: true });
+  await page.screenshot({ path: path.join(root, 'ui', 'performance-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(
@@ -280,7 +279,7 @@ test('performance view compares candidates, remains accessible on mobile and rej
     ),
     [],
   );
-  await page.screenshot({ path: '.atm/ui/performance-mobile.png', fullPage: true });
+  await page.screenshot({ path: path.join(root, 'ui', 'performance-mobile.png'), fullPage: true });
   await writeFile(path.join(latest.dir, 'evidence/performance.json'), '{}');
   await page.getByText('Performance evidence integrity failed.', { exact: true }).waitFor();
   assert.equal(await page.getByRole('region', { name: 'Performance report' }).count(), 0);

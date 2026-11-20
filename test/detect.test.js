@@ -164,7 +164,7 @@ test('CLI detect writes a config, refuses to overwrite without --force, and --pr
   assert.equal(code, 0);
   const written = JSON.parse(await readFile(path.join(dir, 'atm.config.json'), 'utf8'));
   assert.equal(written.schemaVersion, 1);
-  assert.deepEqual(validateGenericConfig(written), validateGenericConfig(written));
+  assert.deepEqual(JSON.parse(JSON.stringify(validateGenericConfig(written))), written);
 
   // Second run without --force is refused.
   await assert.rejects(main(['detect', '--repo', dir]), /already exists; pass --force/);

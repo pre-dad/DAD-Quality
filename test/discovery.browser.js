@@ -287,11 +287,11 @@ test('discovery loop records a defect in real browser evidence and dashboard exp
     audit.violations.map(v => v.id),
     [],
   );
-  await mkdir('.atm/ui', { recursive: true });
-  await page.screenshot({ path: '.atm/ui/discovery-desktop.png', fullPage: true });
+  await mkdir(path.join(root, 'ui'), { recursive: true });
+  await page.screenshot({ path: path.join(root, 'ui', 'discovery-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await page.screenshot({ path: '.atm/ui/discovery-mobile.png', fullPage: true });
+  await page.screenshot({ path: path.join(root, 'ui', 'discovery-mobile.png'), fullPage: true });
   await page.getByRole('button', { name: 'Close run details' }).click();
   await page.getByRole('button', { name: 'Explore application', exact: true }).click();
   await page.getByRole('heading', { name: 'Explore application', exact: true }).waitFor();

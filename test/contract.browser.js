@@ -114,13 +114,23 @@ for (const fault of ['healthy', 'lost-save', 'cross-actor', 'duplicate-write', '
       assert.equal(finding.status, 'reproduced');
       assert.equal(app.judge(finding), true);
       assert.ok(finding.reproduction.baselines['i1:before']);
-      if (finding.initial.baselineId)
+      const expectation = {
+        'lost-save': 'state_equals',
+        'cross-actor': 'state_unchanged',
+        'duplicate-write': 'state_delta',
+        'accept-invalid': 'state_unchanged',
+      }[fault];
+      assert.equal(finding.expectation, expectation);
+      if (expectation === 'state_equals') assert.equal(finding.initial.baselineId, undefined);
+      else {
+        assert.ok(finding.initial.baselineId, 'Relationship findings record the baseline they compared against');
         assert.notEqual(
           finding.initial.baselineId,
           finding.reproduction.verification.baselineId,
           'Replay must capture its own baseline observation',
         );
-      if (finding.expectation === 'state_delta') assert.equal(app.judge({ ...finding, text: '500' }), false);
+      }
+      if (expectation === 'state_delta') assert.equal(app.judge({ ...finding, text: '500' }), false);
     }
     const after = await browser.observe();
     assert.equal(
