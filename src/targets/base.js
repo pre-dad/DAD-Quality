@@ -105,11 +105,11 @@ export class ProvisioningAdapter {
     );
     const revision = stdout.trim();
     if (!/^[a-f0-9]{40,64}$/.test(revision)) throw new RunError('Invalid source revision.');
-    const tree = await command('git', ['ls-tree', '-r', '--name-only', revision], {
+    const tree = await command('git', ['ls-tree', '-r', '-z', '--name-only', revision], {
       cwd: this.repo,
       signal: this.signal,
     });
-    const files = tree.stdout.trim().split('\n');
+    const files = tree.stdout.split('\0').filter(Boolean);
     if (files.some(f => /(^|\/)\.env(?:\.|$)/.test(f) && !f.endsWith('.example')))
       throw new RunError('Snapshot refuses tracked environment files containing potential credentials.');
     for (const file of requiredFiles) {
@@ -122,7 +122,7 @@ export class ProvisioningAdapter {
       signal: this.signal,
     });
     await command('tar', ['-xf', archive, '-C', this.source], { signal: this.signal });
-    const changes = await command('git', ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', revision], {
+    const changes = await command('git', ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '-z', revision], {
       cwd: this.repo,
       signal: this.signal,
     });
@@ -131,7 +131,7 @@ export class ProvisioningAdapter {
       revision,
       sourceArchiveSha256: digest(await readFile(archive)),
       source,
-      changedFiles: changes.stdout.trim().split('\n').filter(Boolean).slice(0, 500),
+      changedFiles: changes.stdout.split('\0').filter(Boolean).slice(0, 500),
       excludesWorkingTreeChanges: true,
       workingTreeDirty: Boolean(worktree.stdout.trim()),
     };

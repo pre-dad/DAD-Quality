@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { ProvisioningAdapter } from '../src/targets/base.js';
 
 function fakeRun(id = 'atm-base-test') {
@@ -68,4 +72,39 @@ test('compose commands are always scoped to the run-owned project and file', asy
   ]);
   assert.equal(captured.options, opts);
   assert.equal(captured.result, result);
+});
+
+async function gitRepo(t, files) {
+  const repo = await mkdtemp(path.join(os.tmpdir(), 'atm-base-repo-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  for (const [name, content] of Object.entries(files)) {
+    await mkdir(path.dirname(path.join(repo, name)), { recursive: true });
+    await writeFile(path.join(repo, name), content);
+  }
+  const git = (...args) => execFileSync('git', ['-c', 'core.quotePath=true', ...args], { cwd: repo, stdio: 'pipe' });
+  git('init', '-q');
+  git('add', '-A');
+  git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
+  return repo;
+}
+
+async function snapshotOf(t, repo, requiredFiles = []) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'atm-base-run-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const run = { ...fakeRun(), dir };
+  run.data = { id: 'atm-base-test' };
+  const adapter = new ProvisioningAdapter(run, { repo });
+  await adapter.snapshot({ evidence: [] }, { requiredFiles, requireMessage: f => `missing ${f}`, source: dir });
+  return run.data.candidate;
+}
+
+test('snapshot refuses a tracked .env under a non-ASCII directory that git quotes', async t => {
+  const repo = await gitRepo(t, { 'é/.env': 'SECRET=1\n', 'app.js': '' });
+  await assert.rejects(snapshotOf(t, repo), /tracked environment files/);
+});
+
+test('snapshot reports non-ASCII changed files and finds required non-ASCII paths', async t => {
+  const repo = await gitRepo(t, { 'é/app.js': '', '.env.example': '' });
+  const candidate = await snapshotOf(t, repo, ['é/app.js']);
+  assert.deepEqual([...candidate.changedFiles].sort(), ['.env.example', 'é/app.js']);
 });
