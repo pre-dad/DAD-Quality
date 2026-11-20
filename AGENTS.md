@@ -18,7 +18,10 @@ only adds what they do not say.
 npm run check        # syntax of every script
 npm run typecheck    # checkJs over src, scripts, dashboard frontend
 npm run lint         # biome, --error-on-warnings (even "info" fails)
-npm test             # full suite incl. a Docker fixture (slow)
+npm test             # unit tests (test/*.test.js)
+npm run test:browser # Playwright dashboard and discovery tests
+npm run test:fixture # Docker fixture run (slow)
+npm audit --audit-level=high
 ```
 
 Fast single file: `node --test test/<file>.test.js`. `npm run format` fixes most lint,

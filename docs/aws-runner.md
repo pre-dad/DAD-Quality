@@ -20,10 +20,10 @@ cloud backend inside ATM is a later increment.
 ## Pieces
 
 - `buildspec.atm.yml` — the CodeBuild buildspec. Clones DAD-Main at the
-  revision passed to `StartBuild` (else the default branch), runs `npm run atm -- run`,
+  revision passed to `StartBuild` (a revision is required), runs `npm run atm -- run`,
   captures ATM's exit code, runs the sync, then exits with ATM's code so CodeBuild and
   any caller gate on ATM's
-  contract (`0`/`1`/`2`/`3`/`130`). The sync never changes that exit code.
+  contract (`0`/`1`/`2`/`3`/`130`). A failing sync is logged and never changes that exit code.
 - `scripts/aws-sync-run.js` — the sync (`npm run aws:sync`). Uploads evidence to
   S3 and reconciles findings into DynamoDB with conditional writes.
 

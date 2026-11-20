@@ -35,8 +35,8 @@ npm run atm -- detect --repo /path/to/your-app --force     # overwrite an existi
 ```
 
 Detection is deterministic and uses no model: it reads the repository's own files
-and derives the `provision` block from them (Keel's principle — derive from the
-real artifact, don't trust a declaration). The output always passes the schema
+and derives the `provision` block from them (derive from the real artifact,
+don't trust a declaration). The output always passes the schema
 validator, or `detect` fails with a message naming the signals it looked for
 rather than writing a half-config. It emits exactly one anonymous `visitor`
 actor; you add authenticated actors and an optional `seed` command by hand, since
