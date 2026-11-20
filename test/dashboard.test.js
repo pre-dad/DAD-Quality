@@ -246,7 +246,7 @@ test('commit watch baselines current revision, runs only new commits and survive
   assert.equal(executions, 1);
 });
 
-// Phase 2: the dashboard is target-aware. A non-dad target explores only, labels its
+// The dashboard is target-aware. A non-dad target explores only, labels its
 // own profile, and threads target + configFile into the explorer.
 test('a generic-web dashboard labels its profile, refuses validation, and threads target into explore', async t => {
   const root = await directory(t);
@@ -272,6 +272,14 @@ test('a generic-web dashboard labels its profile, refuses validation, and thread
   const snapshot = await dashboard.snapshot();
   assert.equal(snapshot.project.target, 'generic-web');
   assert.equal(snapshot.project.profile, 'generic-web · discovery');
+  assert.equal(
+    snapshot.project.version,
+    JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version,
+  );
+  assert.deepEqual(snapshot.project.limits, {
+    discovery: { requests: 40, minutes: 10, tokens: 100_000 },
+    ai: { actions: 12, minutes: 3 },
+  });
 
   await assert.rejects(
     dashboard.start({ mode: 'validation' }),

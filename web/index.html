@@ -20,7 +20,7 @@
       <a href="#findings" data-nav="findings"><span aria-hidden="true">◇</span>Findings <span class="nav-count" id="nav-findings">0</span></a>
       <a href="#about" data-nav="about"><span aria-hidden="true">ⓘ</span>About</a>
     </nav>
-    <div class="sidebar-bottom"><span class="connection-dot"></span><span>Local runner connected</span><small>Private workspace · v0.3.0</small></div>
+    <div class="sidebar-bottom"><span class="connection-dot"></span><span>Local runner connected</span><small>Private workspace · <span id="app-version"></span></small></div>
   </aside>
   <div class="workspace">
     <header class="topbar"><div><span class="muted">Workspace</span><span class="slash">/</span><strong id="project-name">DAD</strong></div><span class="environment"><span class="connection-dot"></span>Local environment</span></header>
@@ -28,6 +28,7 @@
       <div id="connection-error" class="notice error" role="alert" hidden></div>
       <div id="warnings" class="notice" hidden></div>
       <section class="page-heading"><div><div class="eyebrow">APPLICATION QUALITY</div><h1 id="page-title">Release overview</h1><p id="page-description">Validation history and evidence for your application.</p></div><div class="launch-buttons"><button type="button" id="new-exploration" class="button primary">Explore application</button><button type="button" id="new-run" class="button secondary"><span aria-hidden="true">＋</span> Run validation</button></div></section>
+      <div id="run-status" class="sr-only" role="status"></div>
       <div id="content" aria-busy="true"><div class="loading">Loading your workspace…</div></div>
       <footer class="page-footer"><span>Evidence before confidence.</span><span>Local acceptance checks · Production promotion is not configured.</span></footer>
     </main>
@@ -36,7 +37,7 @@
     <form id="launch-form">
       <div class="dialog-top"><div><div class="eyebrow">NEW VALIDATION</div><h2 id="launch-title">Test a candidate</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close new validation">×</button></div>
       <p id="launch-description">Build an isolated environment from a committed revision, run the checks, and collect the evidence.</p><p id="discovery-help" hidden></p>
-      <label for="revision">Commit, branch, or tag</label><input id="revision" name="revision" value="HEAD" maxlength="200" required autocomplete="off" spellcheck="false"><small>Resolved to an exact commit before the run starts. Working tree changes are excluded.</small>
+      <label for="revision">Commit, branch, or tag</label><input id="revision" name="revision" aria-describedby="revision-help" value="HEAD" maxlength="200" required autocomplete="off" spellcheck="false"><small id="revision-help">Resolved to an exact commit before the run starts. Working tree changes are excluded.</small>
       <div class="option-box"><label class="check-label"><input id="ai" type="checkbox"> Include AI exploration <span class="tag">ADVISORY</span></label><p id="ai-help">Uses the model configured on this runner.</p><label class="check-label"><input id="require-ai" type="checkbox" disabled> Require AI exploration to pass</label></div>
       <div id="launch-error" role="alert" class="notice error" hidden></div>
       <div class="dialog-actions"><button type="button" class="button secondary close-dialog">Cancel</button><button id="launch-submit" class="button primary" type="submit">Start validation <span aria-hidden="true">↗</span></button></div>

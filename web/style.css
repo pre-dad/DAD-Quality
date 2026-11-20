@@ -306,7 +306,7 @@ main {
   font-size: 10px;
   letter-spacing: 1.7px;
   font-weight: 650;
-  color: #727e71;
+  color: #596b52;
   margin-bottom: 12px;
 }
 .button {
@@ -382,6 +382,11 @@ main {
 .hero.incomplete {
   background: #faf0e5;
   border-color: #e9d7c0;
+}
+.hero.canceled,
+.hero.empty {
+  background: #f0f1ee;
+  border-color: #dcdfd8;
 }
 .hero.running {
   background: #eaf0f6;
@@ -462,8 +467,8 @@ main {
   font-weight: 550;
 }
 .metric-note {
-  font-size: 10px;
-  color: #748071;
+  font-size: 11px;
+  color: #596b52;
 }
 .panel {
   background: white;
@@ -522,9 +527,9 @@ main {
   margin: 16px 0;
 }
 .tag {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.6px;
-  color: #677563;
+  color: #596b52;
   background: #f0f3ed;
   border: 1px solid #e2e7dc;
   padding: 3px 6px;
@@ -538,7 +543,7 @@ main {
   border-top: 1px solid #edf0e8;
   padding: 12px 0;
 }
-.guide-row:first-of-type {
+.panel-title + .guide-row {
   border-top: 0;
 }
 .guide-icon {
@@ -589,11 +594,11 @@ table {
   text-align: left;
 }
 th {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 1px;
   text-transform: uppercase;
-  color: #758170;
+  color: #596b52;
   padding: 13px 18px;
   background: #fcfdf9;
   border-bottom: 1px solid var(--line);
@@ -701,8 +706,8 @@ progress::-webkit-progress-value {
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  font-size: 10px;
-  color: #829078;
+  font-size: 11px;
+  color: #596b52;
   border-top: 1px solid var(--line);
   margin-top: 34px;
   padding-top: 18px;
@@ -798,11 +803,11 @@ progress::-webkit-progress-value {
   gap: 8px;
   align-items: center;
   margin-top: 10px;
-  font-size: 10px;
-  color: #78836e;
+  font-size: 11px;
+  color: #596b52;
 }
 .finding-meta .tag {
-  font-size: 8px;
+  font-size: 11px;
 }
 .subtle {
   color: #85907e;
@@ -927,6 +932,8 @@ dialog small {
   gap: 8px;
 }
 .evidence-links a {
+  display: inline-block;
+  min-height: 24px;
   font-size: 10px;
   background: #f4f7ee;
   border: 1px solid #e3e9da;
@@ -1255,14 +1262,6 @@ dialog small {
     font-size: 16px;
   }
 }
-.eyebrow,
-.metric-note,
-.tag,
-th,
-.page-footer,
-.finding-meta {
-  color: #596b52;
-}
 @media (prefers-reduced-motion: reduce) {
   * {
     /* biome-ignore lint/complexity/noImportantStyles: reduced motion must override every component. */
@@ -1285,16 +1284,11 @@ th,
   min-height: 24px;
   cursor: pointer;
 }
-.evidence-links a {
-  display: inline-block;
-  min-height: 24px;
-  padding: 4px 0;
-}
 
 .performance-panel {
   margin: 24px 0;
   padding: 20px;
-  border: 1px solid var(--border, #d9dfd6);
+  border: 1px solid var(--line);
   border-radius: 12px;
   min-width: 0;
 }
@@ -1325,7 +1319,7 @@ th,
 .performance-scroll td {
   padding: 10px 8px;
   text-align: left;
-  border-bottom: 1px solid #d9dfd6;
+  border-bottom: 1px solid var(--line);
 }
 .launch-buttons {
   display: flex;
@@ -1344,4 +1338,13 @@ th,
 }
 .performance-panel details {
   margin: 12px 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
