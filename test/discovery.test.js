@@ -281,6 +281,33 @@ test('exploration persists partial reports, safely redacts JSON and cleans up af
   assert.equal(run.data.results.find(r => r.id === 'discovery').status, 'inconclusive');
 });
 
+test('exploration redacts secrets from the persisted summary and the check result', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-discovery-summary-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const run = await executeDiscovery({
+    repo: root,
+    output: root,
+    provider: async () => ({ action: action('reload'), tokens: 1 }),
+    adapterFactory: run => ({
+      snapshot: async () => {
+        run.data.candidate = { source: '/app', revision: 'a'.repeat(40) };
+      },
+      docker: async () => {},
+      build: async () => {},
+      database: async () => {},
+      deploy: async () => {},
+      discoveryFixture: async () => [],
+      cleanup: async () => {},
+    }),
+    browserFactory: async () => {
+      throw new Error('Launch failed: http://127.0.0.1/cb?token=abc123secret');
+    },
+  });
+  const report = await readDiscovery(root, run.data);
+  assert.doesNotMatch(report.summary, /abc123secret/);
+  assert.doesNotMatch(run.data.results.find(r => r.id === 'discovery').summary, /abc123secret/);
+});
+
 test('verified memory crosses runs only within a repository; hypotheses remain reviewable and corrupt evidence is excluded', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'atm-discover-memory-'));
   t.after(() => rm(root, { recursive: true, force: true }));

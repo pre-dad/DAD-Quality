@@ -213,14 +213,13 @@ export async function openDiscoveryBrowser({
       return;
     }
     if (spec.action === 'probe') {
-      let status = 0;
       let json;
       const response = await target.request.get(spec.url, {
         timeout: 10000,
         failOnStatusCode: false,
         maxRedirects: 0,
       });
-      status = response.status();
+      const status = response.status();
       const body = (await response.text()).slice(0, 20_000);
       try {
         json = JSON.parse(body);

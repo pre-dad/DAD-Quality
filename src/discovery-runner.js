@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { modelConfig } from './model-provider.js';
-import { Run, RunError, digest, atomicJSON, redactJSON } from './core.js';
+import { Run, RunError, digest, atomicJSON, redactJSON, redact } from './core.js';
 import { discover, discoveryProvider, discoveryLimits, discoveryInstructions } from './discovery.js';
 import { openDiscoveryBrowser } from './discovery-browser.js';
 import { discoveryMemory } from './discovery-report.js';
@@ -209,7 +209,7 @@ export async function executeDiscovery({
           });
         } catch (error) {
           report.status = signal.aborted ? 'canceled' : 'inconclusive';
-          report.summary = error.message;
+          report.summary = redact(error.message);
         } finally {
           try {
             if (browser) {
@@ -223,7 +223,9 @@ export async function executeDiscovery({
         }
         return {
           status: report.status === 'completed' ? 'passed' : signal.aborted ? 'canceled' : 'inconclusive',
-          summary: `${report.investigations.length} self-selected investigations; ${report.findings.length} potential findings (${report.findings.filter(f => f.status === 'reproduced').length} reproduced). ${report.summary}`,
+          summary: redact(
+            `${report.investigations.length} self-selected investigations; ${report.findings.length} potential findings (${report.findings.filter(f => f.status === 'reproduced').length} reproduced). ${report.summary}`,
+          ),
         };
       });
   } finally {
