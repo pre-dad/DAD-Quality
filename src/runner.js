@@ -32,14 +32,15 @@ export async function executeRun({
     throw new Error('Use the explore command for autonomous discovery.');
   const checks = policy.definition.checks;
   const required = checks.filter(c => c.required).map(c => c.id);
-  const config = checks.some(c => c.id === 'ai-public-journey') ? modelConfig({ model, providerName }) : {};
+  const ai = checks.some(c => c.id === 'ai-public-journey');
+  const config = ai ? modelConfig({ model, providerName }) : {};
   model = config.model ?? model;
   const run = await Run.create(
     output,
     {
       adapter: 'impactgraph',
       revision,
-      ai: checks.some(c => c.id === 'ai-public-journey'),
+      ai,
       model,
       provider: config.providerName,
       trigger,

@@ -47,6 +47,7 @@ export function validateContract(checks) {
         !check.target
       )
         throw new Error('Action contract needs an observed label, path or actor.');
+      if (check.action === 'reload' && check.target) throw new Error('Reload action takes no target.');
       if (check.action === 'check' && !['true', 'false'].includes(check.value))
         throw new Error('Checkbox action requires true or false.');
       actions++;
@@ -114,8 +115,7 @@ export function actionMatches(check, action, observation) {
     if (!control || observation.controls.filter(c => c.label === control.label).length !== 1) return false;
     target = control.label;
   } else if (action.action === 'navigate') target = observation.pages?.find(p => p.id === action.target)?.path;
-  else if (action.action === 'switch_actor') target = action.target;
-  else if (action.action === 'probe') target = action.target;
+  else if (['switch_actor', 'probe'].includes(action.action)) target = action.target;
   return check.target === target;
 }
 

@@ -20,7 +20,8 @@ export function evaluateRelease(run, { evidenceIssues = [], findings = [], input
         ...inputIssues,
       ],
     };
-  const reasons = [...policyIssues(run), ...inputIssues, ...evidenceIssues];
+  const issues = policyIssues(run);
+  const reasons = [...issues, ...inputIssues, ...evidenceIssues];
   const outcome = evaluate(run.required, run.results);
   if (!run.finishedAt) reasons.push('Run is incomplete.');
   if (run.canceledAt) reasons.push('Run was canceled.');
@@ -34,7 +35,7 @@ export function evaluateRelease(run, { evidenceIssues = [], findings = [], input
     reasons.push('Built application image identities are missing.');
   if (!outcome.eligible) reasons.push(...outcome.reasons);
   const definition = run.policy?.definition;
-  if (!policyIssues(run).length) {
+  if (!issues.length) {
     for (const check of definition.checks.filter(c => c.required)) {
       const result = run.results.find(r => r.id === check.id);
       if (!result?.finishedAt) reasons.push(`${check.id}: no completion record.`);

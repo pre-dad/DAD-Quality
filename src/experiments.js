@@ -10,7 +10,7 @@ export function experimentPlan(action, observation, sourceEvidence = []) {
     throw new Error('Investigation value must be a JSON experiment plan.');
   }
   const fields = ['capability', 'behavior', 'state', 'preconditions', 'expected', 'basis', 'references', 'checks'];
-  if (!plan || Array.isArray(plan) || Object.keys(plan).sort().join() !== fields.sort().join())
+  if (!plan || Array.isArray(plan) || Object.keys(plan).sort().join() !== [...fields].sort().join())
     throw new Error('Invalid experiment plan fields.');
   for (const key of fields.filter(k => !['references', 'checks'].includes(k)))
     if (typeof plan[key] !== 'string' || !plan[key].trim() || plan[key].length > 500)

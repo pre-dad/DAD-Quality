@@ -98,6 +98,7 @@ test('contracts reject duplicate IDs, forward checkpoints, unsafe deltas, assert
       requiredAction('reload'),
       requiredAssertion('delta', { expectation: 'state_delta', baseline: 'before', text: '9007199254740992' }),
     ],
+    [requiredAction('reload', 'reload', 'x'), requiredAssertion('ok')],
     [{ ...requiredAction('run'), action: 'eval' }, requiredAssertion('ok')],
     [requiredAction('reload'), { ...requiredAssertion('ok'), code: 'untrusted' }],
   ])

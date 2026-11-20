@@ -149,19 +149,21 @@ export function openAIToolProvider({
     } catch {
       throw new RunError('OpenAI returned an invalid response.');
     }
+    const total = body?.usage?.total_tokens;
+    const tokens = Number.isSafeInteger(total) && total >= 0 ? total : undefined;
+    const failure = message => Object.assign(new RunError(message), tokens === undefined ? {} : { tokens });
     const calls = Array.isArray(body?.output) ? body.output.filter(item => item?.type === 'function_call') : [];
     if (body?.status !== 'completed' || calls.length !== 1 || calls[0].name !== tool.name)
-      throw new RunError('OpenAI did not complete exactly one supported action.');
+      throw failure('OpenAI did not complete exactly one supported action.');
     let action;
     try {
       action = validate(JSON.parse(calls[0].arguments));
     } catch {
-      throw new RunError('OpenAI returned an invalid action.');
+      throw failure('OpenAI returned an invalid action.');
     }
-    const total = body.usage?.total_tokens;
     return {
       action,
-      tokens: Number.isSafeInteger(total) && total >= 0 ? total : undefined,
+      tokens,
       usage: body.usage,
       responseId: typeof body.id === 'string' ? body.id : undefined,
     };

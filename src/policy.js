@@ -35,6 +35,8 @@ function fields(value, allowed) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(k => !allowed.includes(k)))
     throw new Error('Invalid or unsupported policy fields.');
 }
+const explorationChecks = ['snapshot', 'docker', 'build', 'database', 'deploy', 'discovery', 'cleanup'];
+
 export function validatePolicy(policy) {
   fields(policy, ['schemaVersion', 'id', 'version', 'adapter', 'scope', 'checks', 'findings', 'exceptions']);
   if (
@@ -87,19 +89,14 @@ export function validatePolicy(policy) {
       throw new Error('Cleanup requires at least 110 seconds for bounded log collection and removal.');
   }
   for (const id of exploration
-    ? ['snapshot', 'docker', 'build', 'database', 'deploy', 'discovery', 'cleanup']
+    ? explorationChecks
     : ['snapshot', 'docker', 'build', 'database', 'api-tests', 'web-tests', 'deploy', 'cleanup']) {
     if (!policy.checks.some(c => c.id === id && c.required))
       throw new Error(`Required foundation check missing: ${id}`);
   }
   if (!exploration && !policy.checks.some(c => c.scenario && c.required && c.id !== 'ai-public-journey'))
     throw new Error('At least one deterministic journey must be required.');
-  if (
-    exploration &&
-    policy.checks.some(
-      c => !['snapshot', 'docker', 'build', 'database', 'deploy', 'discovery', 'cleanup'].includes(c.id),
-    )
-  )
+  if (exploration && policy.checks.some(c => !explorationChecks.includes(c.id)))
     throw new Error('Exploration does not execute predefined suites.');
   if (!exploration && policy.checks.some(c => c.id === 'discovery'))
     throw new Error('Discovery requires an exploration policy.');
