@@ -33,7 +33,7 @@ cloud backend inside ATM is a later increment.
 | --- | --- | --- |
 | `ATM_EVIDENCE_BUCKET` | RunnerStack | S3 bucket, `atm-evidence-<env>-<account>`. |
 | `ATM_FINDINGS_TABLE` | RunnerStack | DynamoDB table, `atm-findings-<env>`. |
-| `ATM_ENV` | RunnerStack | `staging` or `production` (informational). |
+| `ATM_ENV` | RunnerStack | `staging` or `production`. Set by the stack; the sync does not read it. |
 | `GITHUB_APP_TOKEN` | optional, per `StartBuild` call | Token for the clone; empty clones anonymously (DAD-Main is public). |
 | `SOURCE_VERSION` / `CODEBUILD_RESOLVED_SOURCE_VERSION` | StartBuild | Revision to validate. |
 | `ATM_RUN_ROOT` / `ATM_RUN_ID` | buildspec | Run directory to sync (or pass `--run-root` / `--run-id`). |
@@ -78,12 +78,14 @@ Each finding becomes one ledger item:
 - **Reconcile an existing finding.** If the create's condition fails, an
   `UpdateItem` runs, guarded by `attribute_exists(PK) ... AND lastSeen < :lastSeen`
   so a concurrent run cannot move `lastSeen` backward or clobber a newer
-  observation. A lost-update race is benign (the other run recorded the same
-  recurrence), so a failed guard is swallowed.
-- **Reopen on recurrence.** When a finding that was `resolved` or `dismissed`
-  recurs, `collectFindings` reports it as `reopened`; the update then sets
-  `disposition`/`status` to `reopened` and stamps `reopenedAt`. This mirrors the
-  reopen rule in `src/history.js` and `src/ci.js`.
+  observation. It advances `lastSeen`, `lastRunId` and `updatedAt` and adds this
+  run's observations to `occurrences`; it never writes `disposition` or `status`.
+  A lost-update race is benign (the other run recorded the same recurrence), so
+  a failed guard is swallowed.
+- **Reopen on recurrence.** Before that update, a conditional `UpdateItem` sets
+  `disposition`/`status` to `reopened` and stamps `reopenedAt` only when the
+  stored disposition is `resolved` or `dismissed` and `lastSeen` is older than
+  this run. This mirrors the reopen rule in `src/history.js` and `src/ci.js`.
 - **Triage stays with operators.** The worker sync never confirms, resolves, or
   dismisses a finding — those transitions are made out of band, exactly as
   `src/ci.js publishProposal` enforces for the GitHub gate.

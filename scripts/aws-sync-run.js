@@ -15,7 +15,6 @@
 // injects — never hardcoded:
 //   ATM_EVIDENCE_BUCKET  S3 bucket (atm-evidence-<env>-<account>)
 //   ATM_FINDINGS_TABLE   DynamoDB table (atm-findings-<env>)
-//   ATM_ENV              staging | production (informational)
 // The source repo + revision for the S3 key layout come from ATM's own run
 // manifest (run.candidate.source = 'github:<repo>', run.candidate.revision =
 // <40-hex sha>), matching how ATM already records the validated revision.
@@ -28,17 +27,15 @@ import path from 'node:path';
 import { lstat, readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { BUNDLE_PATH } from '../src/core.js';
 import { collectFindings, readRun } from '../src/history.js';
 
-// collectFindings already applies the reopen rule (a closed finding whose
-// failure recurs comes back as 'reopened'); mirrors src/history.js and
-// src/ci.js mergeFindings. The sync reflects that disposition, it never triages.
+// Mirrors the reopen rule in src/history.js and src/ci.js mergeFindings. The
+// stored disposition lives only in DynamoDB, so the reopen is a conditional write.
 const REOPENED = 'reopened';
 
 // The evidence objects every bundle carries, plus each result's declared
 // evidence files. Matches src/ci.js evidenceBundle's allow-list exactly.
-const EVIDENCE_PATH = /^(run\.json|report\.html|evidence\/[A-Za-z0-9_.-]+)$/;
-
 const truthy = value => value === '1' || value === 'true' || value === 'yes';
 
 export function isDryRun(env = process.env) {
@@ -59,7 +56,7 @@ export function readConfig(env = process.env) {
   const table = env.ATM_FINDINGS_TABLE;
   if (!bucket) throw new Error('ATM_EVIDENCE_BUCKET is not set.');
   if (!table) throw new Error('ATM_FINDINGS_TABLE is not set.');
-  return { bucket, table, env: env.ATM_ENV ?? 'unknown' };
+  return { bucket, table };
 }
 
 // Resolve the files that belong to a run, in the same allow-list order as the
@@ -68,7 +65,7 @@ function runFiles(run) {
   const names = ['run.json', 'report.html'];
   for (const result of run.results ?? []) {
     for (const item of result.evidence ?? []) {
-      if (EVIDENCE_PATH.test(item.path) && !names.includes(item.path)) names.push(item.path);
+      if (BUNDLE_PATH.test(item.path) && !names.includes(item.path)) names.push(item.path);
     }
   }
   return names;
@@ -93,19 +90,26 @@ export function planEvidenceUploads(run, { bucket, runRoot }) {
   }));
 }
 
+const CONTENT_TYPES = {
+  '.json': 'application/json',
+  '.html': 'text/html; charset=utf-8',
+  '.log': 'text/plain; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.zip': 'application/zip',
+  '.png': 'image/png',
+};
+
 function contentTypeFor(name) {
-  if (name.endsWith('.json')) return 'application/json';
-  if (name.endsWith('.html')) return 'text/html; charset=utf-8';
-  return 'text/plain; charset=utf-8';
+  return CONTENT_TYPES[path.extname(name).toLowerCase()] ?? 'application/octet-stream';
 }
 
 // Build the DynamoDB write plan for a run's findings. One write per finding:
 //   - PK = source#<repo>, SK = finding#<id>
 //   - create-if-absent: Put with ConditionExpression attribute_not_exists(PK)
-//   - existing finding: Update guarded by the prior disposition/updatedAt so a
-//     concurrent run cannot clobber a triage decision. A recurrence of a closed
-//     finding reopens it (disposition -> 'reopened'); otherwise the ledger's
-//     disposition is preserved and only occurrence bookkeeping advances.
+//   - existing finding: Update guarded by lastSeen so a concurrent run cannot
+//     move it backward; occurrences are added, never overwritten, and triage
+//     fields are untouched. A conditional reopen reverts only a stored
+//     resolved/dismissed disposition to 'reopened' when the failure recurs.
 // The by-status GSI 'status' attribute is written on every item so the
 // "unresolved blocking findings for this source" query is serviceable.
 export function planLedgerWrites(findings, { table, repo }) {
@@ -115,8 +119,6 @@ export function planLedgerWrites(findings, { table, repo }) {
   return findings.map(finding => {
     const sk = `finding#${finding.id}`;
     const occurrences = Array.isArray(finding.occurrences) ? finding.occurrences.length : 0;
-    const status = finding.disposition;
-    const reopen = finding.disposition === REOPENED;
     return {
       findingId: finding.id,
       create: {
@@ -131,7 +133,7 @@ export function planLedgerWrites(findings, { table, repo }) {
           kind: finding.kind,
           severity: finding.severity,
           disposition: finding.disposition,
-          status,
+          status: finding.disposition,
           firstSeen: finding.firstSeen,
           lastSeen: finding.lastSeen,
           lastRunId: finding.lastRunId,
@@ -142,26 +144,37 @@ export function planLedgerWrites(findings, { table, repo }) {
         ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       },
       // Reconcile an already-present finding. The guard keeps a run from moving
-      // lastSeen backward and only ever advances a closed finding to 'reopened'
-      // — triage transitions (confirm/resolve/dismiss) are owned by operators,
+      // lastSeen backward, and the update never writes disposition or status:
+      // triage transitions (confirm/resolve/dismiss) are owned by operators,
       // never by a worker sync, mirroring src/ci.js publishProposal.
       update: {
         TableName: table,
         Key: { PK: pk, SK: sk },
         UpdateExpression:
-          'SET lastSeen = :lastSeen, lastRunId = :lastRunId, occurrences = :occurrences, updatedAt = :lastSeen, #status = :status, disposition = :disposition' +
-          (reopen ? ', reopenedAt = :lastSeen' : ''),
+          'SET lastSeen = :lastSeen, lastRunId = :lastRunId, updatedAt = :lastSeen ADD occurrences :occurrences',
         ConditionExpression: 'attribute_exists(PK) AND attribute_exists(SK) AND lastSeen < :lastSeen',
-        ExpressionAttributeNames: { '#status': 'status' },
         ExpressionAttributeValues: {
           ':lastSeen': finding.lastSeen,
           ':lastRunId': finding.lastRunId,
           ':occurrences': occurrences,
-          ':status': reopen ? 'reopened' : status,
-          ':disposition': reopen ? 'reopened' : finding.disposition,
         },
       },
-      reopen,
+      // Only a recurrence of a closed finding moves its disposition, and only
+      // to 'reopened'. The stored disposition decides, so this is conditional
+      // and must be applied before the update advances lastSeen.
+      reopen: {
+        TableName: table,
+        Key: { PK: pk, SK: sk },
+        UpdateExpression: 'SET disposition = :reopened, #status = :reopened, reopenedAt = :lastSeen',
+        ConditionExpression: 'disposition IN (:resolved, :dismissed) AND lastSeen < :lastSeen',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: {
+          ':lastSeen': finding.lastSeen,
+          ':reopened': REOPENED,
+          ':resolved': 'resolved',
+          ':dismissed': 'dismissed',
+        },
+      },
     };
   });
 }
@@ -202,13 +215,15 @@ export async function syncRun({ runRoot, runId, config, clients }) {
       await ddb.send(new PutCommand(write.create));
     } catch (error) {
       if (error?.name !== 'ConditionalCheckFailedException') throw error;
-      // The finding already exists; reconcile it. A lost update race (another
-      // run advanced lastSeen first) is benign — that run recorded the same
-      // recurrence — so a failed guard here is swallowed.
-      try {
-        await ddb.send(new UpdateCommand(write.update));
-      } catch (updateError) {
-        if (updateError?.name !== 'ConditionalCheckFailedException') throw updateError;
+      // The finding already exists; reconcile it. A failed guard is benign:
+      // either another run advanced lastSeen first and recorded the same
+      // recurrence, or the finding was not closed.
+      for (const request of [write.reopen, write.update]) {
+        try {
+          await ddb.send(new UpdateCommand(request));
+        } catch (updateError) {
+          if (updateError?.name !== 'ConditionalCheckFailedException') throw updateError;
+        }
       }
     }
   }

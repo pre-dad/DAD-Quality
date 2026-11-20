@@ -61,12 +61,16 @@ export async function atomicJSON(file, value) {
   await rename(temporary, file);
 }
 
+// Evidence names are flat files; '.' and '..' would address the directory itself.
+export const EVIDENCE_FILE = /^evidence\/(?!\.+$)[A-Za-z0-9_.-]+$/;
+export const BUNDLE_PATH = /^(run\.json|report\.html|evidence\/(?!\.+$)[A-Za-z0-9_.-]+)$/;
+
 export async function verifyEvidence(directory, run) {
   const issues = [];
   for (const result of run.results) {
     for (const item of result.evidence ?? []) {
       const relative = item.path;
-      if (typeof relative !== 'string' || !/^evidence\/[A-Za-z0-9_.-]+$/.test(relative)) {
+      if (typeof relative !== 'string' || !EVIDENCE_FILE.test(relative)) {
         issues.push(`${result.id}: invalid evidence path`);
         continue;
       }

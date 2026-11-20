@@ -9,6 +9,7 @@ import {
   planEvidenceUploads,
   planLedgerWrites,
   planRun,
+  syncRun,
   repoFromSource,
   readConfig,
   isDryRun,
@@ -39,11 +40,36 @@ test('repoFromSource strips the github: transport prefix', () => {
   assert.throws(() => repoFromSource(undefined), /candidate.source is required/);
 });
 
-test('readConfig reads bucket/table/env from the injected environment', () => {
+test('readConfig reads bucket and table from the injected environment', () => {
   const env = { ATM_EVIDENCE_BUCKET: BUCKET, ATM_FINDINGS_TABLE: TABLE, ATM_ENV: 'staging' };
-  assert.deepEqual(readConfig(env), { bucket: BUCKET, table: TABLE, env: 'staging' });
+  assert.deepEqual(readConfig(env), { bucket: BUCKET, table: TABLE });
   assert.throws(() => readConfig({ ATM_FINDINGS_TABLE: TABLE }), /ATM_EVIDENCE_BUCKET/);
   assert.throws(() => readConfig({ ATM_EVIDENCE_BUCKET: BUCKET }), /ATM_FINDINGS_TABLE/);
+});
+
+test('evidence content types follow the extension and default to binary', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-sync-types-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const run = await buildRun(root);
+  run.data.results[0].evidence = [
+    'evidence/a.log',
+    'evidence/b.txt',
+    'evidence/c.zip',
+    'evidence/d.png',
+    'evidence/e.bin',
+  ].map(file => ({ path: file }));
+  const types = Object.fromEntries(
+    planEvidenceUploads(run.data, { bucket: BUCKET }).map(u => [u.key.split('/').pop(), u.contentType]),
+  );
+  assert.deepEqual(types, {
+    'run.json': 'application/json',
+    'report.html': 'text/html; charset=utf-8',
+    'a.log': 'text/plain; charset=utf-8',
+    'b.txt': 'text/plain; charset=utf-8',
+    'c.zip': 'application/zip',
+    'd.png': 'image/png',
+    'e.bin': 'application/octet-stream',
+  });
 });
 
 test('isDryRun honors ATM_SYNC_DRY_RUN', () => {
@@ -101,32 +127,59 @@ test('planLedgerWrites builds create-if-absent + guarded reopen conditional writ
     // Update is guarded so a concurrent run cannot move lastSeen backward.
     assert.match(write.update.ConditionExpression, /attribute_exists\(PK\)/);
     assert.match(write.update.ConditionExpression, /lastSeen < :lastSeen/);
-    assert.equal(write.update.ExpressionAttributeNames['#status'], 'status');
     assert.equal(write.update.ExpressionAttributeValues[':lastSeen'], finding.lastSeen);
+    // The normal update must not overwrite operator triage with the run's 'untriaged'.
+    assert.doesNotMatch(write.update.UpdateExpression, /disposition|#status/);
+    assert.equal(write.update.ExpressionAttributeNames, undefined);
+    assert.equal(write.update.ExpressionAttributeValues[':status'], undefined);
+    assert.equal(write.update.ExpressionAttributeValues[':disposition'], undefined);
+    // Occurrences accumulate across runs instead of being replaced by this run's count.
+    assert.match(write.update.UpdateExpression, /ADD occurrences :occurrences/);
+    assert.doesNotMatch(write.update.UpdateExpression, /occurrences = /);
+    assert.equal(write.update.ExpressionAttributeValues[':occurrences'], finding.occurrences.length);
   }
 });
 
-test('planLedgerWrites reopens a closed finding when the failure recurs', async t => {
+test('planLedgerWrites reopens only a stored resolved or dismissed finding', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'atm-sync-reopen-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const run = await buildRun(root);
-  const [base] = await collectFindings(root, [run.data]);
+  const findings = await collectFindings(root, [run.data]);
+  const [write] = planLedgerWrites(findings, { table: TABLE, repo: REPO });
+  assert.equal(write.reopen.Key.SK, `finding#${findings[0].id}`);
+  assert.match(write.reopen.ConditionExpression, /disposition IN \(:resolved, :dismissed\)/);
+  assert.match(write.reopen.ConditionExpression, /lastSeen < :lastSeen/);
+  assert.match(write.reopen.UpdateExpression, /reopenedAt = :lastSeen/);
+  assert.equal(write.reopen.ExpressionAttributeValues[':reopened'], 'reopened');
+  assert.equal(write.reopen.ExpressionAttributeValues[':resolved'], 'resolved');
+  assert.equal(write.reopen.ExpressionAttributeValues[':dismissed'], 'dismissed');
+});
 
-  for (const disposition of ['resolved', 'dismissed']) {
-    const saved = {
-      disposition,
-      severity: 'high',
-      updatedAt: '2000-01-01T00:00:00.000Z',
-      audit: [{ disposition, note: 'Reviewed an older occurrence.' }],
-    };
-    const [reopened] = await collectFindings(root, [run.data], { [base.id]: saved });
-    assert.equal(reopened.disposition, 'reopened', 'history reopens on recurrence');
-    const [write] = planLedgerWrites([reopened], { table: TABLE, repo: REPO });
-    assert.equal(write.reopen, true);
-    assert.equal(write.update.ExpressionAttributeValues[':status'], 'reopened');
-    assert.equal(write.update.ExpressionAttributeValues[':disposition'], 'reopened');
-    assert.match(write.update.UpdateExpression, /reopenedAt = :lastSeen/);
-  }
+test('syncRun reopens before it advances an existing finding and tolerates failed guards', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-sync-live-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const run = await buildRun(root);
+  const calls = [];
+  const conditional = Object.assign(new Error('guard'), { name: 'ConditionalCheckFailedException' });
+  const clients = {
+    s3: { send: async () => ({}) },
+    ddb: {
+      send: async command => {
+        calls.push(command.constructor.name);
+        if (command.constructor.name === 'PutCommand') throw conditional;
+        if (command.input.UpdateExpression.startsWith('SET disposition')) throw conditional;
+        return {};
+      },
+    },
+  };
+  const plan = await syncRun({
+    runRoot: root,
+    runId: run.data.id,
+    config: { bucket: BUCKET, table: TABLE },
+    clients,
+  });
+  assert.equal(calls.length, plan.ledgerWrites.length * 3);
+  assert.deepEqual(calls.slice(0, 3), ['PutCommand', 'UpdateCommand', 'UpdateCommand']);
 });
 
 test('planRun composes S3 + ledger plans from a finished run without touching AWS', async t => {
