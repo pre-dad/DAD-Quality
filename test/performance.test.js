@@ -59,6 +59,29 @@ test('metrics count failed attempts, nearest-rank percentiles, throughput and em
   assert.equal(metrics([], 100).p95Ms, null);
 });
 
+test('a single extra error is below the error-rate regression threshold', () => {
+  const phase = (name, errorRate) => ({
+    name,
+    p95Ms: 10,
+    successfulThroughput: 100,
+    errorRate,
+    endpoints: {},
+  });
+  const run = (errorRate, regression) => ({
+    completed: true,
+    workloadDigest: 'w',
+    environmentDigest: 'e',
+    assessment: { status: 'observed' },
+    profile: { regression: { p95Ratio: 1.5, minP95IncreaseMs: 20, throughputRatio: 0.75, ...regression } },
+    phases: [phase('baseline', errorRate), phase('burst', errorRate)],
+  });
+  const baseline = run(0);
+  assert.equal(comparePerformance(run(0.002), baseline).regression, false);
+  assert.equal(comparePerformance(run(0.02), baseline).regression, true);
+  assert.equal(comparePerformance(run(0.002, { errorRateIncrease: 0 }), baseline).regression, true);
+  assert.equal(comparePerformance(run(0), baseline).regression, false);
+});
+
 test('real HTTP load detects slow bodies, error responses and candidate regressions', async t => {
   let slow = false,
     failing = false;
@@ -94,6 +117,7 @@ test('real HTTP load detects slow bodies, error responses and candidate regressi
   const broken = await measurePerformance(options);
   assert.equal(broken.phases[1].errorRate, 1);
   assert.ok(broken.assessment.reasons.some(r => r.includes('error rate')));
+  assert.equal(comparePerformance(broken, fast).regression, true);
   assert.equal(comparePerformance({ ...degraded, environmentDigest: 'different-host' }, fast).comparable, false);
   assert.equal(comparePerformance({ ...degraded, workloadDigest: 'different-load' }, fast).comparable, false);
 });
@@ -161,6 +185,15 @@ test('policy bounds load and requires explicit budgets before making performance
     },
     p => {
       p.regression.throughputRatio = 2;
+    },
+    p => {
+      p.regression.errorRateIncrease = -0.1;
+    },
+    p => {
+      p.regression.unknown = 1;
+    },
+    p => {
+      delete p.regression.p95Ratio;
     },
   ]) {
     const p = profile();

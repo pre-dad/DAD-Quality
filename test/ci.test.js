@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, readFile, symlink, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, symlink, mkdir, truncate } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { generateKeyPairSync } from 'node:crypto';
@@ -238,4 +238,80 @@ test('worker proposals cannot discard historical findings or change their severi
     mutate(proposal);
     assert.throws(() => publish({ ...next, proposal }, { ledger, execution: '100:2' }));
   }
+});
+
+test('worker proposals cannot inflate occurrences, misattribute runs or claim future observations', async t => {
+  const { run, prepare, publish } = await fixture(t);
+  checkResult(run.data, 'api-tests').status = 'failed';
+  await run.save();
+  const ledger = publish(await prepare());
+  const next = await prepare(ledger);
+  next.proposal.execution = '100:2';
+  const accepted = publish(next, { ledger, execution: '100:2' });
+  assert.equal(accepted.findings[0].occurrences, ledger.findings[0].occurrences);
+  const recurrence = structuredClone(next.proposal);
+  recurrence.runId = 'atm-20261010010000-12345678';
+  recurrence.findings[0] = { ...recurrence.findings[0], lastRunId: recurrence.runId, occurrences: 2 };
+  recurrence.findings[0].lastSeen = new Date(Date.parse(ledger.findings[0].lastSeen) + 1000).toISOString();
+  const now = Date.parse(recurrence.findings[0].lastSeen) + 1000;
+  const ok = (proposal, extra = {}) => publish({ ...next, proposal }, { ledger, execution: '100:2', now, ...extra });
+  assert.equal(ok(recurrence).findings[0].occurrences, 2);
+  for (const mutate of [
+    p => {
+      p.findings[0].occurrences = 50;
+    },
+    p => {
+      p.findings[0].lastRunId = ledger.findings[0].lastRunId;
+    },
+    p => {
+      p.findings[0].lastSeen = '2999-01-01T00:00:00.000Z';
+    },
+    p => {
+      p.findings.push({ ...p.findings[0], id: 'f'.repeat(24), occurrences: 9 });
+    },
+  ]) {
+    const proposal = structuredClone(recurrence);
+    mutate(proposal);
+    assert.throws(() => ok(proposal));
+  }
+});
+
+test('finding timestamps compare as instants, not strings', () => {
+  const finding = (lastSeen, lastRunId) => ({
+    id: 'a'.repeat(24),
+    source,
+    check: 'api-tests',
+    firstSeen: lastSeen,
+    lastSeen,
+    lastRunId,
+  });
+  const ledger = mergeFindings(emptyLedger(source), [
+    finding('2026-01-01T08:00:00.000Z', 'atm-20260101080000-aaaaaaaa'),
+  ]);
+  assert.throws(
+    () => mergeFindings(ledger, [finding('2026-01-01T11:00:00.000+05:00', 'atm-20260101060000-bbbbbbbb')]),
+    /Out-of-order/,
+  );
+  const merged = mergeFindings(ledger, [finding('2026-01-01T07:00:00.000-02:00', 'atm-20260101090000-cccccccc')]);
+  assert.equal(merged.findings[0].occurrences, 2);
+});
+
+test('malformed proposal checks fail with the uniform binding error', async t => {
+  const { prepare, publish } = await fixture(t);
+  const result = await prepare();
+  for (const check of [null, 'api-tests', 7])
+    assert.throws(
+      () => publish({ ...result, proposal: { ...result.proposal, checks: [check] } }),
+      /Candidate, evidence or ledger binding mismatch/,
+    );
+});
+
+test('bundles reject dot-only evidence names and oversized evidence', async t => {
+  const { run, prepare } = await fixture(t);
+  run.data.results[0].evidence.push({ path: 'evidence/..', sha256: 'a'.repeat(64), bytes: 0 });
+  await assert.rejects(prepare(), /Unsafe bundle path/);
+  run.data.results[0].evidence.pop();
+  const big = path.join(run.dir, 'evidence/candidate.json');
+  await truncate(big, 257 * 1024 * 1024);
+  await assert.rejects(prepare(), /too large/);
 });
