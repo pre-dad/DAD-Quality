@@ -9,8 +9,8 @@ import { Run, atomicJSON } from '../src/core.js';
 import { discoveryPolicy } from '../src/discovery-runner.js';
 import { discover, discoveryProvider } from '../src/discovery.js';
 
-const action = (action, fields = {}) => ({
-  action,
+const action = (name, fields = {}) => ({
+  action: name,
   target: '',
   value: '',
   title: '',

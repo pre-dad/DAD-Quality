@@ -79,6 +79,9 @@ export function composeDefinition({ id, port, password, apiPassword, staffPasswo
       ingress: {
         image: NGINX,
         labels: { 'atm.run': id },
+        security_opt: ['no-new-privileges:true'],
+        cap_drop: ['ALL'],
+        cap_add: ['CHOWN', 'SETGID', 'SETUID', 'NET_BIND_SERVICE'],
         networks: ['isolated', 'edge'],
         ports: [`127.0.0.1:${port}:8080`],
         volumes: ['./nginx.conf:/etc/nginx/conf.d/default.conf:ro'],

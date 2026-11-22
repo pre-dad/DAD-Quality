@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readFile, mkdir, writeFile, lstat } from 'node:fs/promises';
 import { createCipheriv, createDecipheriv, publicEncrypt, privateDecrypt, randomBytes, constants } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { digest, verifyEvidence } from './core.js';
+import { BUNDLE_PATH, digest, verifyEvidence } from './core.js';
 import { collectFindings, RUN_ID } from './history.js';
 import { evaluateRelease } from './release.js';
 import { hashPolicy } from './policy.js';
@@ -11,6 +11,8 @@ const sha = /^[a-f0-9]{40}$/;
 const hash = /^[a-f0-9]{64}$/;
 const sourcePattern = /^github:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const date = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+const earlier = (a, b) => Date.parse(a) < Date.parse(b);
+const MAX_BUNDLE_BYTES = 256 * 1024 * 1024;
 const fail = message => {
   throw new Error(message);
 };
@@ -120,7 +122,7 @@ export function mergeFindings(ledger, incoming) {
         audit: [],
       });
     } else if (existing.lastRunId !== f.lastRunId) {
-      if (f.lastSeen < existing.lastSeen) fail('Out-of-order finding observation.');
+      if (earlier(f.lastSeen, existing.lastSeen)) fail('Out-of-order finding observation.');
       Object.assign(existing, { lastSeen: f.lastSeen, lastRunId: f.lastRunId, occurrences: existing.occurrences + 1 });
       // Both dismissal and resolution must be reviewed if the failure recurs.
       if (['resolved', 'dismissed'].includes(existing.disposition)) existing.disposition = 'reopened';
@@ -136,15 +138,26 @@ async function evidenceBundle(run, publicKey) {
   if (!(await lstat(path.join(run.dir, 'evidence'))).isDirectory())
     fail('Evidence directory must not be a symbolic link.');
   const files = {};
-  for (const name of [
+  const names = [
     'run.json',
     'report.html',
     ...new Set(run.data.results.flatMap(r => (r.evidence ?? []).map(e => e.path))),
-  ]) {
-    if (!/^(run\.json|report\.html|evidence\/[A-Za-z0-9_.-]+)$/.test(name)) fail('Unsafe bundle path.');
+  ];
+  let total = 0;
+  for (const name of names) {
+    if (!BUNDLE_PATH.test(name)) fail('Unsafe bundle path.');
+    try {
+      const stat = await lstat(path.join(run.dir, name));
+      if (!stat.isFile()) fail('Bundle file is not regular.');
+      total += stat.size;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  if (total > MAX_BUNDLE_BYTES) fail('Evidence bundle is too large.');
+  for (const name of names) {
     const file = path.join(run.dir, name);
     try {
-      if (!(await lstat(file)).isFile()) fail('Bundle file is not regular.');
       files[name] = (await readFile(file)).toString('base64');
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
@@ -182,11 +195,7 @@ export function decryptBundle(bytes, privateKey) {
   decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
   const plaintext = Buffer.concat([decipher.update(Buffer.from(envelope.data, 'base64')), decipher.final()]);
   const bundle = JSON.parse(gunzipSync(plaintext, { maxOutputLength: 512 * 1024 * 1024 }).toString('utf8'));
-  if (
-    bundle.schemaVersion !== 1 ||
-    !bundle.files ||
-    Object.keys(bundle.files).some(name => !/^(run\.json|report\.html|evidence\/[A-Za-z0-9_.-]+)$/.test(name))
-  )
+  if (bundle.schemaVersion !== 1 || !bundle.files || Object.keys(bundle.files).some(name => !BUNDLE_PATH.test(name)))
     fail('Unsafe evidence bundle.');
   return bundle;
 }
@@ -215,7 +224,23 @@ export async function prepareProposal({ run, ledger, publicKey, execution }) {
   return { proposal, bundle: bundle.bytes, assessment };
 }
 
-export function publishProposal({ ledger, proposal, source, execution, revision, artifactId, artifactDigest, bundle }) {
+// A single run adds at most one observation: counts and lastRunId move together.
+function observedOnce(prior, current, runId) {
+  if (current.occurrences === prior.occurrences) return current.lastRunId === prior.lastRunId;
+  return current.occurrences === prior.occurrences + 1 && current.lastRunId === runId;
+}
+
+export function publishProposal({
+  ledger,
+  proposal,
+  source,
+  execution,
+  revision,
+  artifactId,
+  artifactDigest,
+  bundle,
+  now = Date.now(),
+}) {
   validateLedger(ledger, source);
   fields(proposal, [
     'schemaVersion',
@@ -245,7 +270,11 @@ export function publishProposal({ ledger, proposal, source, execution, revision,
     typeof proposal.eligible !== 'boolean' ||
     !Array.isArray(proposal.checks) ||
     proposal.checks.some(
-      c => !/^[a-z-]+$/.test(c.id) || !['passed', 'failed', 'inconclusive', 'canceled'].includes(c.status),
+      c =>
+        !c ||
+        typeof c !== 'object' ||
+        !/^[a-z-]+$/.test(c.id) ||
+        !['passed', 'failed', 'inconclusive', 'canceled'].includes(c.status),
     )
   )
     fail('Candidate, evidence or ledger binding mismatch.');
@@ -278,8 +307,8 @@ export function publishProposal({ ledger, proposal, source, execution, revision,
       current.updatedAt !== prior.updatedAt ||
       current.firstSeen !== prior.firstSeen ||
       current.check !== prior.check ||
-      current.lastSeen < prior.lastSeen ||
-      current.occurrences < prior.occurrences ||
+      earlier(current.lastSeen, prior.lastSeen) ||
+      !observedOnce(prior, current, proposal.runId) ||
       (current.disposition !== prior.disposition &&
         !(['resolved', 'dismissed'].includes(prior.disposition) && current.disposition === 'reopened'))
     )
@@ -288,7 +317,9 @@ export function publishProposal({ ledger, proposal, source, execution, revision,
   for (const f of next.findings.filter(f => !ledger.findings.some(p => p.id === f.id))) {
     if (f.severity !== 'unassessed' || f.disposition !== 'untriaged' || f.audit.length)
       fail('New findings must be unassessed.');
+    if (f.occurrences !== 1 || f.lastRunId !== proposal.runId) fail('Worker cannot misreport finding history.');
   }
+  if (next.findings.some(f => Date.parse(f.lastSeen) > now)) fail('Finding observed in the future.');
   if (
     proposal.eligible &&
     next.findings.some(

@@ -23,8 +23,8 @@ npm run atm -- explore --repo /path/to/your-app --target generic-web --model YOU
 Django/Procfile/Rails) and derives a validated `atm.config.json`; you review it, add any
 authenticated actors, and explore. See [the generic target guide](docs/generic-target.md).
 The `dad` target keeps its built-in provisioning and the release-validation `run` command;
-other targets use discovery. Installed as a package, the CLI is available as `atm`
-(e.g. `npx atm detect --repo .`).
+other targets use discovery. The package is private; run the CLI with
+`npm run atm -- detect --repo .`, `node src/cli.js`, or `npm link` to get `atm` on your PATH.
 
 ## Open the workspace
 
@@ -58,8 +58,7 @@ Dashboard state is stored in `.atm/runs/.dashboard/state.json`. Only one dashboa
 
 The DAD rebrand retains the versioned `impactgraph` adapter/policy identifiers and
 evidence-key filenames so existing policies, finding IDs and retained reports stay
-compatible. New dashboard sessions default to the
-sibling `../DAD-Main` checkout. A history directory remains bound to its original
+compatible. The dashboard requires `--repo`. A history directory remains bound to its original
 absolute repository path; moving a checkout requires a reviewed history migration,
 including source identities and finding assessments. Do not edit or delete history
 to bypass that guard. Historical URLs and diagnostic source revisions retain their
@@ -77,7 +76,7 @@ Each run gets a unique directory under `.atm/runs/`, a Docker Compose project, a
 
 ```sh
 npm run atm -- inspect .atm/runs/RUN_ID/run.json
-npm run atm -- run --repo /path/to/DAD-Main --revision COMMIT_SHA --output /private/tmp/atm-runs
+npm run atm -- run --repo /path/to/DAD-Main --revision COMMIT_SHA --output "$TMPDIR/atm-runs"
 ```
 
 Only committed source is archived. Uncommitted changes, ignored files, local `.env` files, existing databases, and existing application servers are not used. Run-owned containers are removed even after a failed check or normal cancellation. Docker image tags, build cache, source archives, and evidence are retained for diagnosis.
@@ -181,17 +180,6 @@ To verify the complete dashboard-to-DAD path, start the dashboard and run `npm r
 Unit and integration tests exercise source-reader boundaries, structured experiment evidence, typed state assertions, clean-fixture mutation replay and restoration, versioned policy validation, missing or modified evidence, finding-based acceptance, agreement between CLI and dashboard assessments, donor state invariants, fail-closed decisions, evidence persistence, secret filtering, command failures/timeouts/cancellation, isolation configuration, model-action validation, independent verification, finding deduplication, persistent triage, request protection, and commit-watch behavior. Browser tests cover the dashboard's full interaction flow, keyboard focus during polling, responsive layout and automated accessibility checks on the overview, evidence dialog, finding dialog and mobile findings view, including a passing-checks/blocked-acceptance case after evidence modification, plus real request blocking and the exploration loop, without API charges.
 
 API implementation references: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling), [Playwright BrowserContext](https://playwright.dev/docs/api/class-browsercontext), and [Docker Compose internal networks](https://docs.docker.com/reference/compose-file/networks/).
-
-## Next increments
-
-- Run the live-model discovery benchmark and review discovery quality on DAD; expand staff identity support and approved state projections beyond donor profiles.
-- Expand deployed acceptance scenarios: role-specific staff permissions, referral attribution, recurring gifts, worker recovery.
-- Add sandbox Stripe and captured-email services with explicit egress rules.
-- Adapt the existing full Playwright suite to deployed targets and ingest structured suite results.
-- Add security/accessibility gates; calibrate performance budgets and expand the read baseline to write, worker, soak and capacity workloads.
-- Resolve DAD's build-time origin configuration before same-image staging/production promotion.
-- Add evidence retention, richer finding extraction, PR/staging triggers and an authenticated shared deployment.
-- Add production deployment and recovery automation only after staging evidence and rollback compatibility are established.
 
 ## Repository conventions
 

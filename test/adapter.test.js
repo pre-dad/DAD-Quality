@@ -16,6 +16,9 @@ test('runtime isolates database and disables external integrations', () => {
   assert.equal(config.services['test-postgres'].ports, undefined);
   assert.equal(config.services.web.ports, undefined);
   assert.deepEqual(config.services.ingress.ports, ['127.0.0.1:43123:8080']);
+  assert.deepEqual(config.services.ingress.security_opt, ['no-new-privileges:true']);
+  assert.deepEqual(config.services.ingress.cap_drop, ['ALL']);
+  assert.deepEqual(config.services.ingress.cap_add, ['CHOWN', 'SETGID', 'SETUID', 'NET_BIND_SERVICE']);
   for (const service of Object.values(config.services)) {
     assert.equal(service.env_file, undefined);
     assert.equal(service.environment?.STRIPE_SECRET_KEY, undefined);
@@ -152,4 +155,26 @@ test('cleanup removes containers and volumes even when log collection fails', as
   assert.ok(down.args.includes('down'));
   assert.ok(down.args.includes('--volumes'));
   assert.ok(down.args.includes('--remove-orphans'));
+});
+
+test('DadAdapter accepts only GitHub owner/repo source identities', () => {
+  const run = { data: { id: 'fixture' }, dir: '/tmp/fixture' };
+  assert.equal(
+    new DadAdapter(run, { repo: '/synthetic', sourceIdentity: 'github:owner/repo-1.x' }).sourceIdentity,
+    'github:owner/repo-1.x',
+  );
+  assert.equal(new DadAdapter(run, { repo: '/synthetic' }).sourceIdentity, undefined);
+  for (const value of [
+    'owner/repo',
+    'github:owner',
+    'github:owner/repo/extra',
+    'github:ow ner/repo',
+    'https://github.com/o/r',
+    'github:owner/repo\n',
+  ])
+    assert.throws(
+      () => new DadAdapter(run, { repo: '/synthetic', sourceIdentity: value }),
+      /Invalid GitHub source identity/,
+      value,
+    );
 });

@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { Run } from '../src/core.js';
+import { Run, RunError } from '../src/core.js';
 import { GenericWebAdapter } from '../src/targets/generic/index.js';
 import { resolveTarget, isRegisteredAdapter } from '../src/targets/index.js';
 import { discoveryPolicy } from '../src/discovery-runner.js';
@@ -194,7 +194,132 @@ test('the real start command gets a clean environment, PORT, and its whole proce
     await new Promise(resolve => setTimeout(resolve, 100));
   assert.deepEqual(JSON.parse(await readFile(out, 'utf8')), { port: '4321', secret: null });
   const { pid } = adapter.process;
+  t.after(() => {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      /* The group is already gone. */
+    }
+  });
   await adapter.cleanup({ evidence: [] });
-  await new Promise(resolve => setTimeout(resolve, 300));
+  const deadline = Date.now() + 5000;
+  let gone = false;
+  while (!gone && Date.now() < deadline) {
+    try {
+      process.kill(-pid, 0);
+      await new Promise(resolve => setTimeout(resolve, 50));
+    } catch (error) {
+      assert.equal(error.code, 'ESRCH');
+      gone = true;
+    }
+  }
+  assert.ok(gone, 'the start command process group is still running');
+});
+
+test('cleanup escalates to SIGKILL for a start command that ignores SIGTERM', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-generic-stubborn-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const script = 'process.on("SIGTERM",()=>{});console.log("ready");setInterval(()=>{},1000);';
+  const adapter = new GenericWebAdapter(
+    { dir: root, data: { id: 'run-x', candidate: {} }, evidence: async (name, content) => `${name}:${content}` },
+    { repo: root, revision: 'HEAD' },
+  );
+  adapter.config = { provision: { mode: 'command', start: [process.execPath, '-e', script] } };
+  adapter.source = root;
+  adapter.port = 4322;
+  await adapter.startCommand();
+  const { pid } = adapter.process;
+  t.after(() => {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      /* The group is already gone. */
+    }
+  });
+  for (let i = 0; i < 50 && !adapter.startOutput; i++) await new Promise(resolve => setTimeout(resolve, 100));
+  const result = { evidence: [] };
+  await adapter.cleanup(result);
   assert.throws(() => process.kill(-pid, 0), { code: 'ESRCH' });
+  assert.ok(result.evidence.some(e => e.startsWith('start.log:') && e.includes('ready')));
+});
+
+test('a start command that exits fails readiness immediately and its output is kept as evidence', async t => {
+  const { root, repo } = await makeRepo();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const run = await Run.create(path.join(root, 'runs'), { mode: 'exploration' }, ['snapshot', 'deploy']);
+  const adapter = new GenericWebAdapter(run, { repo, signal: new AbortController().signal });
+  await adapter.snapshot({ evidence: [] });
+  adapter.config = {
+    ...adapter.config,
+    provision: {
+      ...adapter.config.provision,
+      start: [process.execPath, '-e', 'console.error("boom: missing dependency");process.exit(3)'],
+      startupTimeoutMs: 60_000,
+    },
+  };
+  const result = { evidence: [] };
+  const started = Date.now();
+  await assert.rejects(adapter.deploy(result), /did not become ready.*start command ended/s);
+  assert.ok(Date.now() - started < 20_000, 'readiness polling must stop once the start command has exited');
+  assert.ok(result.evidence.some(e => e.path === 'evidence/start.log'));
+  const log = await readFile(path.join(run.dir, 'evidence/start.log'), 'utf8');
+  assert.match(log, /exited with code 3/);
+  assert.match(log, /boom: missing dependency/);
+  await adapter.cleanup({ evidence: [] });
+});
+
+test('compose mode binds the published port to loopback only', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-generic-compose-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const adapter = new GenericWebAdapter(
+    { dir: root, data: { id: 'run-x' }, evidence: async name => name },
+    { repo: root },
+  );
+  adapter.source = path.join(root, 'source');
+  adapter.port = 45678;
+  adapter.config = {
+    provision: { mode: 'compose', composeFile: 'docker-compose.yml', service: 'web', port: 8080 },
+  };
+  assert.deepEqual(adapter.composeDefinition(), {
+    include: [path.join(root, 'source', 'docker-compose.yml')],
+    services: { web: { ports: ['127.0.0.1:45678:8080'] } },
+  });
+});
+
+test('compose mode reports a failed seed command and always removes containers and volumes on cleanup', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-generic-compose-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = [];
+  class StubbedCompose extends GenericWebAdapter {
+    async compose(args) {
+      calls.push(['compose', ...args]);
+      if (args[0] === 'run') throw new Error('seed exploded');
+      return { stdout: '', stderr: '' };
+    }
+    async composeRun(_result, label, args) {
+      calls.push([label, ...args]);
+      return { stdout: '', stderr: '' };
+    }
+  }
+  const adapter = new StubbedCompose(
+    { dir: root, data: { id: 'run-x' }, evidence: async name => name },
+    { repo: root },
+  );
+  adapter.config = {
+    provision: { mode: 'compose', composeFile: 'docker-compose.yml', service: 'web', port: 8080 },
+    seed: ['./seed.sh'],
+    actors: [],
+  };
+  await assert.rejects(adapter.discoveryFixture(), error => {
+    assert.ok(error instanceof RunError);
+    assert.equal(error.status, 'failed');
+    assert.match(error.message, /Seed command failed: seed exploded/);
+    return true;
+  });
+  assert.deepEqual(calls[0], ['compose', 'run', '--rm', '-T', 'web', './seed.sh']);
+  adapter.created = true;
+  const result = { evidence: [] };
+  await adapter.cleanup(result);
+  const down = calls.find(call => call[0] === 'cleanup');
+  assert.deepEqual(down.slice(1, 4), ['down', '--volumes', '--remove-orphans']);
 });

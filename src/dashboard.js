@@ -1,4 +1,6 @@
 import { modelConfig } from './model-provider.js';
+import { discoveryLimits } from './discovery.js';
+import { publicAgentLimits } from './agent.js';
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, unlink, open, lstat, realpath } from 'node:fs/promises';
@@ -17,6 +19,9 @@ import { resolveTarget } from './targets/index.js';
 
 const assets = fileURLToPath(new URL('../web/', import.meta.url));
 const MAX_BODY = 16_384;
+const { version: packageVersion } = JSON.parse(
+  await readFile(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+);
 class HttpError extends Error {
   constructor(status, message) {
     super(message);
@@ -178,6 +183,15 @@ export class Dashboard {
         aiConfigured: modelConfig({ providerName: this.providerName, model: this.model }).configured,
         provider: this.providerName,
         model: this.model ?? null,
+        version: packageVersion,
+        limits: {
+          discovery: {
+            requests: discoveryLimits.requests,
+            minutes: discoveryLimits.durationMs / 60_000,
+            tokens: discoveryLimits.totalTokens,
+          },
+          ai: { actions: publicAgentLimits.maxActions, minutes: publicAgentLimits.maxDurationMs / 60_000 },
+        },
       },
       runs: runs.map(run => summarize(run, this.active?.id)),
       findings: inputs.findings,
@@ -434,7 +448,7 @@ export async function createDashboardServer(options) {
       }
       throw new HttpError(404, 'Not found.');
     } catch (error) {
-      json(response, error.status ?? (error.code === 'ENOENT' || /Invalid run/.test(error.message) ? 404 : 500), {
+      json(response, error.status ?? (error.code === 'ENOENT' ? 404 : 500), {
         error: redact(error.message),
       });
     }

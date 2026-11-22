@@ -10,8 +10,8 @@ import { createDashboardServer } from '../src/dashboard.js';
 import { chromium } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 
-const action = (action, fields = {}) => ({
-  action,
+const action = (name, fields = {}) => ({
+  action: name,
   target: '',
   value: '',
   title: '',

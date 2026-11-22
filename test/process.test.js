@@ -42,3 +42,27 @@ test('cancellation terminates an active process', async () => {
   setTimeout(() => controller.abort(), 100);
   await assert.rejects(promise, e => e.status === 'canceled');
 });
+
+test('a stopped command also force-kills descendants that ignore SIGTERM', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const leader = `
+    const { spawn } = require('node:child_process');
+    const child = spawn(process.execPath, ['-e', 'process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'], { stdio: 'ignore' });
+    console.log(child.pid);
+    setInterval(() => {}, 1000);
+  `;
+  const error = await command(process.execPath, ['-e', leader], { timeout: 500 }).catch(e => e);
+  const pid = Number(error.stdout.trim());
+  assert.ok(Number.isInteger(pid) && pid > 0);
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (let i = 0; i < 20 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(alive(), false);
+});

@@ -473,7 +473,6 @@ export async function discover({
             } else if (!initial.evaluable || initial.passed)
               event.outcome = initial.reason ?? 'The declared mismatch is no longer present.';
             else {
-              const reproduction = await browser.reproduce(assertion, observation);
               const fingerprint = digest(
                 JSON.stringify([
                   observation.actor,
@@ -484,25 +483,29 @@ export async function discover({
                   check.text,
                 ]),
               ).slice(0, 24);
-              const finding = {
-                id: fingerprint,
-                title: action.title || active.title,
-                basis: active.hypothesis,
-                plan: active.plan,
-                contractCheck: check,
-                assertion: { target: assertion.target, value: assertion.value, baseline: assertion.baseline },
-                investigationId: active.id,
-                actor: observation.actor,
-                path: observation.path,
-                expectation: assertion.expectation,
-                text: assertion.text,
-                initial,
-                reproduction,
-                status: reproduction.status === 'reproduced' ? 'reproduced' : 'observed',
-                needsReview: true,
-              };
-              if (!report.findings.some(f => f.id === fingerprint)) report.findings.push(finding);
-              event.outcome = `${finding.status}; human review of expected behavior required.`;
+              if (report.findings.some(f => f.id === fingerprint)) event.outcome = 'Already reported.';
+              else {
+                const reproduction = await browser.reproduce(assertion, observation);
+                const finding = {
+                  id: fingerprint,
+                  title: action.title || active.title,
+                  basis: active.hypothesis,
+                  plan: active.plan,
+                  contractCheck: check,
+                  assertion: { target: assertion.target, value: assertion.value, baseline: assertion.baseline },
+                  investigationId: active.id,
+                  actor: observation.actor,
+                  path: observation.path,
+                  expectation: assertion.expectation,
+                  text: assertion.text,
+                  initial,
+                  reproduction,
+                  status: reproduction.status === 'reproduced' ? 'reproduced' : 'observed',
+                  needsReview: true,
+                };
+                report.findings.push(finding);
+                event.outcome = `${finding.status}; human review of expected behavior required.`;
+              }
             }
           } catch (error) {
             if (signal.aborted || browser.fatal) throw error;
@@ -550,7 +553,6 @@ export async function discover({
           } else if (!initial.evaluable || initial.passed)
             event.outcome = initial.reason ?? 'Rejected: captured evidence satisfies the expectation.';
           else {
-            const reproduction = await browser.reproduce(action, observation);
             const fingerprint = digest(
               JSON.stringify([
                 observation.actor,
@@ -567,24 +569,28 @@ export async function discover({
                     : null,
               ]),
             ).slice(0, 24);
-            const finding = {
-              id: fingerprint,
-              title: action.title,
-              basis: action.reason,
-              plan: active.plan,
-              assertion: { target: action.target, value: action.value },
-              investigationId: active.id,
-              actor: observation.actor,
-              path: observation.path,
-              expectation: action.expectation,
-              text: action.text,
-              initial,
-              reproduction,
-              status: reproduction.status === 'reproduced' ? 'reproduced' : 'observed',
-              needsReview: true,
-            };
-            if (!report.findings.some(f => f.id === fingerprint)) report.findings.push(finding);
-            event.outcome = `${finding.status}; human review of expected behavior required.`;
+            if (report.findings.some(f => f.id === fingerprint)) event.outcome = 'Already reported.';
+            else {
+              const reproduction = await browser.reproduce(action, observation);
+              const finding = {
+                id: fingerprint,
+                title: action.title,
+                basis: action.reason,
+                plan: active.plan,
+                assertion: { target: action.target, value: action.value },
+                investigationId: active.id,
+                actor: observation.actor,
+                path: observation.path,
+                expectation: action.expectation,
+                text: action.text,
+                initial,
+                reproduction,
+                status: reproduction.status === 'reproduced' ? 'reproduced' : 'observed',
+                needsReview: true,
+              };
+              report.findings.push(finding);
+              event.outcome = `${finding.status}; human review of expected behavior required.`;
+            }
           }
         }
       } else if (action.action === 'finish') {

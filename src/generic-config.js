@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { RunError } from './core.js';
 
@@ -184,9 +184,11 @@ export async function loadGenericConfig(dir, file = 'atm.config.json') {
   assert(RELATIVE.test(file), 'atm.config.json: config path must be repo-relative.');
   let text;
   try {
-    text = await readFile(path.join(dir, file), 'utf8');
+    const full = path.join(dir, file);
+    if (!(await lstat(full)).isFile()) throw new Error('not a regular file');
+    text = await readFile(full, 'utf8');
   } catch {
-    throw new RunError(`Generic target requires ${file} at the repository root; none was found.`);
+    throw new RunError(`Generic target requires ${file} as a regular file at the repository root; none was found.`);
   }
   let parsed;
   try {

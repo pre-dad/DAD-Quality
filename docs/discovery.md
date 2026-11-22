@@ -49,7 +49,7 @@ npm start -- --repo /path/to/DAD-Main                    # DAD target (default)
 npm start -- --repo /path/to/repo --target generic-web   # any web app via atm.config.json
 ```
 
-The dashboard requires `--repo` (there is no longer a built-in default). A non-DAD
+The dashboard requires `--repo`. A non-DAD
 target offers exploration only; the dashboard labels its profile with the target name.
 
 Fixture initialization and replay restart the ingress together with the application
@@ -160,7 +160,13 @@ browser errors. An assertion contradicted by the evidence is rejected. Truncated
 text makes text checks inconclusive. Supported expectations are `text_present`,
 `text_absent`, `no_server_error`, `no_page_error`, `field_value`, `field_checked`,
 `path_equals`, `state_equals`, `state_unchanged`, `state_delta`, `field_unchanged`,
-and `checkbox_unchanged`. Missing fields are inconclusive, never assumed
+`checkbox_unchanged`, `a11y_clean`, `response_status` and `json_has`. `a11y_clean`
+passes when the axe-core WCAG 2a/2aa audit of the observed page reports no
+violations; it is inconclusive when the audit was not captured. The `probe` action
+issues a loopback-relative GET through the authenticated page context and attaches
+the response status and parsed JSON to the observation; `response_status` and
+`json_has` (dotted key path, optional value) evaluate it and are inconclusive when
+no probe preceded them. Missing fields are inconclusive, never assumed
 matches. The DAD adapter independently reads only the two synthetic donors'
 public names, email notification preferences/version, gift count, and active session
 count. It exposes no arbitrary query tool or session credentials. Code is evidence
@@ -312,12 +318,7 @@ The command requires `--live`, an explicit model, and configured credentials. It
 not run by routine tests. Optional `--token-price USD_PER_MILLION_TOTAL_TOKENS` adds a
 user-supplied blended cost estimate; without it, no dollar cost is inferred.
 
-```sh
-npm run check
-npm test
-npm run test:browser
-npm run test:fixture   # explicit disposable PostgreSQL/Docker dump-and-restore check
-```
+See [AGENTS.md](../AGENTS.md) for the test commands.
 
 Controlled-provider browser tests prove the investigation machinery and mutation
 replay. Only live-model runs and reviewed findings establish discovery quality.
@@ -385,29 +386,7 @@ sequence. It evaluates relationships against those fresh values, never original-
 baseline values. Checkpoints and both comparison observations are retained with
 reproduction evidence and exported regression candidates.
 
-No live-model before/after result is claimed for this change: credentials and model
-configuration were deferred. A private pre-change source archive is retained under
-`.atm/benchmark-baselines/pre-contracts.tgz` so the earlier engine can be run later
-with the same model and budgets. It contains source only, without keys, run history,
-or dependency directories. Extract it to a separate directory and install its locked
-dependencies to run its existing `benchmark:discovery` command. Run the current
-command separately and compare `benchmark.json` outputs. Keep model, repetition
-count, budgets, and application contract fixed, and inspect partial runs and unmatched
-findings alongside detection rate. Current reports record prompt/application hashes
-and budgets for provenance. The archived earlier engine uses its earlier scoring
-schema; reviewed literal findings are directly comparable, while additional
-relationship-based detections need their evidence reviewed.
+## Memory and live-model quality
 
-## Controlled memory acceptance
-
-The browser suite exercises three separate runs with newly seeded identities and
-real Chromium: persistence is investigated first; a second run retrieves its source-
-bound evidence and chooses isolation; a handler-source change then marks both related
-investigations for revalidation and a third run revisits persistence. The test also
-checks the persisted index, linked retrieval evidence, dashboard download, mobile
-layout, and accessibility. A controlled provider selects the experiments in this
-test; it establishes the memory/retrieval plumbing, not live-model planning quality.
-Unit tests cover older-than-five-run retrieval, repository isolation, missing and
-changed files, source linked during investigations, stale provenance, tampered
-supporting evidence, and explicit memory budgets. No model configuration or API call
-is required for these checks.
+Memory retrieval, stale-provenance handling and memory budgets are tested with a
+controlled provider, which proves the plumbing, not live-model planning quality.

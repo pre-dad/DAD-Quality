@@ -34,24 +34,24 @@ jobs:
         run: |
           [[ "$CANDIDATE" =~ ^[a-f0-9]{40}$ ]]
           echo "revision=$CANDIDATE" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ steps.candidate.outputs.revision }}
           path: candidate
           persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: pre-dad/DAD-Quality
           ref: ATM_COMMIT_SHA
           path: atm
           persist-credentials: false
           token: ${{ secrets.ATM_READ_TOKEN || github.token }}
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: atm-state
           path: state
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - run: npm ci --ignore-scripts
@@ -67,14 +67,19 @@ jobs:
         # bundle contains declared evidence; never upload the whole run folder.
         run: |
           mkdir -p "$RUNNER_TEMP/atm"
+          status=0
           node atm/scripts/github-ci.js run \
             --repo candidate --revision "$CANDIDATE" --source "$SOURCE" \
             --state state/ledger.json --execution "$EXECUTION" \
             --public-key atm/integrations/github/impactgraph-evidence.pub.pem \
-            --output "$RUNNER_TEMP/atm" > "$RUNNER_TEMP/atm-console.log" 2>&1
+            --output "$RUNNER_TEMP/atm" > "$RUNNER_TEMP/atm-console.log" 2>&1 || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::ATM validation failed with exit code $status; details are withheld from the public log."
+            exit "$status"
+          fi
       - name: Retain encrypted evidence and public proposal
         id: evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: atm-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -95,21 +100,21 @@ jobs:
       verdict: ${{ steps.publish.outputs.verdict }}
     steps:
       # This fresh runner never builds or executes candidate code.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: pre-dad/DAD-Quality
           ref: ATM_COMMIT_SHA
           path: atm
           persist-credentials: false
           token: ${{ secrets.ATM_READ_TOKEN || github.token }}
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: atm-state
           path: state
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.validate.outputs.artifact_id }}
           path: proposal

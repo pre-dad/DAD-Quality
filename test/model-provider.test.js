@@ -242,7 +242,6 @@ test('Tinker backfills missing schema string fields so strict validation passes'
   // schema-declared string fields were omitted by the model.
   reply.content[1].input = { action: 'finish', reason: 'No app connected.', value: '', target: '' };
   const result = await provider(reply)(input);
-  // After backfilling, every declared key is present with '' where not supplied.
   assert.deepEqual(result.action, {
     action: 'finish',
     target: '',
@@ -286,6 +285,11 @@ test('OpenAI transport, malformed and unaccounted responses stay inconclusive wi
       decide(input),
       error => pattern.test(error.message) && error.status === 'inconclusive' && !error.message.includes('sk-test'),
     );
+  for (const value of [
+    { status: 'incomplete', output: [call], usage: { total_tokens: 7 } },
+    { status: 'completed', output: [{ ...call, arguments: '{}' }], usage: { total_tokens: 7 } },
+  ])
+    await assert.rejects(reply(value)(input), error => error.tokens === 7);
   const decision = await reply({ status: 'completed', output: [call], usage: { total_tokens: 12 } })(input);
   assert.equal(decision.tokens, 12);
   assert.deepEqual(decision.action, action);

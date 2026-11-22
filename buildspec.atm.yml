@@ -42,6 +42,7 @@ phases:
       - rm -rf dad-main-src
       - git clone "https://x-access-token:${GITHUB_APP_TOKEN}@github.com/pre-dad/DAD-Main.git" dad-main-src
       - git -C dad-main-src checkout "$SOURCE_SHA"
+      - git -C dad-main-src remote set-url origin https://github.com/pre-dad/DAD-Main.git
 
   build:
     commands:
@@ -62,7 +63,7 @@ phases:
       # under $ATM_OUTPUT/runs; sync reads it read-only.
       - export ATM_RUN_ROOT="$PWD/$ATM_OUTPUT/runs"
       - export ATM_RUN_ID="$(ls -1t "$ATM_RUN_ROOT" | head -n1)"
-      - npm run aws:sync -- --run-root "$ATM_RUN_ROOT" --run-id "$ATM_RUN_ID"
+      - 'npm run aws:sync -- --run-root "$ATM_RUN_ROOT" --run-id "$ATM_RUN_ID" || echo "aws:sync failed (exit $?)"'
       # Gate on ATM's contract: exit with the code ATM produced, not the sync's.
       - exit "${ATM_EXIT:-2}"
 

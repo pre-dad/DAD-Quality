@@ -43,7 +43,7 @@ existing protections, then verify that a failing ATM result blocks merging.
 5. Open a same-repository PR targeting `dev`. Verify the exact candidate SHA in
    `proposal.json`, the encrypted artifact, the state commit and the final
    **ATM acceptance** check. A green validation job alone is insufficient.
-6. In GitHub branch protection or a ruleset, add **ATM acceptance** as a required
+6. Optional, once the owner decides to enforce it (see Branch protection): in GitHub branch protection or a ruleset, add **ATM acceptance** as a required
    status check for `dev` and the production promotion branch. Preserve existing
    checks and review rules; require up-to-date branches if that is the release
    policy. Protect workflow/policy changes through review. A workflow file alone

@@ -357,9 +357,8 @@ export async function buildApplicationMemory({ root, runs, candidate, source, ac
           if (!verification.has(record.evidence.runId)) verification.set(record.evidence.runId, verify(record));
           await verification.get(record.evidence.runId);
         } catch {
-          warnings.push(
-            `Application memory excluded ${record.id} during retrieval: supporting evidence no longer verifies.`,
-          );
+          const warning = `Application memory excluded ${record.id} during retrieval: supporting evidence no longer verifies.`;
+          if (!warnings.includes(warning)) warnings.push(warning);
           continue;
         }
         const item = summary(record);

@@ -74,6 +74,8 @@ export async function command(
       reject(new RunError(`${binary} could not start: ${error.message}`));
     });
     child.once('close', (code, termSignal) => {
+      // The leader can exit on SIGTERM while a descendant in its group ignores it.
+      if (reason && process.platform !== 'win32') kill(true);
       cleanup();
       const output = Object.fromEntries(
         Object.entries(chunks).map(([key, values]) => [key, Buffer.concat(values).toString('utf8')]),

@@ -7,12 +7,11 @@ const escapeHTML = value =>
 const titleCase = value => (value ? value[0].toUpperCase() + value.slice(1) : '');
 const date = value =>
   new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const duration = ms =>
-  !Number.isFinite(ms)
-    ? '—'
-    : ms < 60_000
-      ? `${Math.round(ms / 1000)}s`
-      : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+const duration = ms => {
+  if (!Number.isFinite(ms)) return '—';
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+};
 const badge = (status, mode) =>
   `<span class="badge ${escapeHTML(status)}">${escapeHTML(mode === 'exploration' && status === 'passed' ? 'Completed' : titleCase(status))}</span>`;
 const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
@@ -31,7 +30,8 @@ let state,
   previousState = '',
   detailFingerprint = '',
   toastTimer,
-  launchMode = 'validation';
+  launchMode = 'validation',
+  wasActive = false;
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
@@ -42,8 +42,8 @@ async function api(url, options = {}) {
       ...options.headers,
     },
   });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? 'The request could not be completed.');
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error ?? `The request failed (HTTP ${response.status}).`);
   return body;
 }
 function toast(message) {
@@ -110,7 +110,7 @@ function findingsView() {
       (filter === 'all' ||
         (filter === 'open' ? !['resolved', 'dismissed'].includes(f.disposition) : f.disposition === filter)),
   );
-  return `<div class="toolbar"><input id="search" aria-label="Search findings" placeholder="Search findings…" value="${escapeHTML(search)}"><select id="filter" aria-label="Filter findings">${['all', 'open', 'untriaged', 'confirmed', 'resolved', 'dismissed'].map(value => `<option value="${value}" ${filter === value ? 'selected' : ''}>${value === 'all' ? 'All findings' : titleCase(value)}</option>`).join('')}</select></div><p class="section-note">Agent hypotheses and recurring check failures are grouped here. Triage records your assessment; it never changes a run’s result.</p><div class="finding-list">${findings.length ? findings.map(f => `<article class="finding-card"><span class="finding-icon" aria-hidden="true">◇</span><div class="finding-body"><h3>${escapeHTML(f.title)}</h3><div class="finding-meta"><span class="tag">${escapeHTML(f.check)}</span><span>${f.occurrences.length} ${f.occurrences.length === 1 ? 'occurrence' : 'occurrences'}</span><span>·</span><span>${escapeHTML(titleCase(f.disposition))}</span>${f.severity !== 'unassessed' ? `<span class="tag">${escapeHTML(f.severity)}</span>` : ''}</div><p>${f.latestCheckPassed ? 'This check passed in a later run. Review before resolving.' : `Last seen ${escapeHTML(date(f.lastSeen))}`}</p></div><button class="button secondary" data-finding="${f.id}">Review ↗</button></article>`).join('') : '<div class="empty"><h2>No findings to show</h2><p>Completed check failures will appear here with evidence and reproduction details.</p></div>'}</div>`;
+  return `<div class="toolbar"><input id="search" aria-label="Search findings" placeholder="Search findings…" value="${escapeHTML(search)}"><select id="filter" aria-label="Filter findings">${['all', 'open', 'untriaged', 'confirmed', 'resolved', 'dismissed'].map(value => `<option value="${value}" ${filter === value ? 'selected' : ''}>${value === 'all' ? 'All findings' : titleCase(value)}</option>`).join('')}</select></div><p class="section-note">Agent hypotheses and recurring check failures are grouped here. Triage records your assessment; it never changes a run’s result.</p><div class="finding-list">${findings.length ? findings.map(f => `<article class="finding-card"><span class="finding-icon" aria-hidden="true">◇</span><div class="finding-body"><h3>${escapeHTML(f.title)}</h3><div class="finding-meta"><span class="tag">${escapeHTML(f.check)}</span><span>${f.occurrences.length} ${f.occurrences.length === 1 ? 'occurrence' : 'occurrences'}</span><span>·</span><span>${escapeHTML(titleCase(f.disposition))}</span>${f.severity !== 'unassessed' ? `<span class="tag">${escapeHTML(f.severity)}</span>` : ''}</div><p>${f.latestCheckPassed ? 'This check passed in a later run. Review before resolving.' : `Last seen ${escapeHTML(date(f.lastSeen))}`}</p></div><button class="button secondary" data-finding="${escapeHTML(f.id)}">Review ↗</button></article>`).join('') : '<div class="empty"><h2>No findings to show</h2><p>Completed check failures will appear here with evidence and reproduction details.</p></div>'}</div>`;
 }
 function runsView() {
   const runs = state.runs.filter(
@@ -121,7 +121,7 @@ function runsView() {
 }
 
 function aboutView() {
-  return `<div class="about-grid"><article class="panel"><div class="eyebrow">ATM · VERSION 0.3.0</div><h2>Evidence before confidence.</h2><p>ATM is a private, local quality workspace for DAD. It builds committed candidates in isolated containers, exercises critical staff and donor journeys in a real browser, verifies persisted state independently, and retains the evidence behind every result.</p><p>Commit watch can validate each new local commit while the dashboard runs. A passing run means the candidate satisfies the recorded local acceptance policy. It never authorizes a production release.</p></article><article class="panel"><h2>What validation covers</h2><ul><li>Production API and frontend image builds</li><li>Go race-enabled API tests and frontend lint, unit, and type checks</li><li>Staff passkey activation, sign-out, and sign-in</li><li>Donor account claim, session, and replay protection</li><li>Host, authentication, and persisted-state boundaries</li><li>Advisory baseline, burst, and recovery measurements</li></ul></article><article class="panel"><h2>Autonomous discovery</h2><ul><li>Explore application starts the candidate with a guest and two synthetic donors, and no prescribed journey.</li><li>The agent reads the pinned source, chooses its own experiments, and declares executable checks before acting.</li><li>Mismatches are replayed against a clean fixture; reproduced findings still need a person to confirm the expected behavior.</li><li>Each exploration is limited to 40 model requests, 10 minutes, and 100,000 tokens, and needs a configured provider and model.</li><li>Explorations never assess release readiness.</li></ul></article><article class="panel"><h2>Safety and privacy</h2><ul><li>Runs use synthetic identities and disposable PostgreSQL storage.</li><li>The dashboard binds to loopback and is intended for one trusted local operator.</li><li>Mutations require same-origin requests and a session token.</li><li>Evidence stays local unless the optional encrypted GitHub gate is configured.</li><li>Browser traces can contain synthetic session data and should remain private.</li></ul></article><article class="panel"><h2>Known limits</h2><ul><li>No production deployment, promotion, rollback, or monitoring.</li><li>No live Stripe, email, push, or external integration coverage.</li><li>The default performance profile is advisory and does not establish capacity.</li><li>AI discovery findings remain hypotheses until a person reviews them.</li><li>Trusted source is required: dependency and container build scripts execute candidate code.</li></ul></article></div>`;
+  return `<div class="about-grid"><article class="panel"><div class="eyebrow">ATM · VERSION ${escapeHTML(state.project.version)}</div><h2>Evidence before confidence.</h2><p>ATM is a private, local quality workspace for DAD. It builds committed candidates in isolated containers, exercises critical staff and donor journeys in a real browser, verifies persisted state independently, and retains the evidence behind every result.</p><p>Commit watch can validate each new local commit while the dashboard runs. A passing run means the candidate satisfies the recorded local acceptance policy. It never authorizes a production release.</p></article><article class="panel"><h2>What validation covers</h2><ul><li>Production API and frontend image builds</li><li>Go race-enabled API tests and frontend lint, unit, and type checks</li><li>Staff passkey activation, sign-out, and sign-in</li><li>Donor account claim, session, and replay protection</li><li>Host, authentication, and persisted-state boundaries</li><li>Advisory baseline, burst, and recovery measurements</li></ul></article><article class="panel"><h2>Autonomous discovery</h2><ul><li>Explore application starts the candidate with a guest and two synthetic donors, and no prescribed journey.</li><li>The agent reads the pinned source, chooses its own experiments, and declares executable checks before acting.</li><li>Mismatches are replayed against a clean fixture; reproduced findings still need a person to confirm the expected behavior.</li><li>Each exploration is limited to ${state.project.limits.discovery.requests} model requests, ${state.project.limits.discovery.minutes} minutes, and ${state.project.limits.discovery.tokens.toLocaleString('en-US')} tokens, and needs a configured provider and model.</li><li>Explorations never assess release readiness.</li></ul></article><article class="panel"><h2>Safety and privacy</h2><ul><li>Runs use synthetic identities and disposable PostgreSQL storage.</li><li>The dashboard binds to loopback and is intended for one trusted local operator.</li><li>Mutations require same-origin requests and a session token.</li><li>Evidence stays local unless the optional encrypted GitHub gate is configured.</li><li>Browser traces can contain synthetic session data and should remain private.</li></ul></article><article class="panel"><h2>Known limits</h2><ul><li>No production deployment, promotion, rollback, or monitoring.</li><li>No live Stripe, email, push, or external integration coverage.</li><li>The default performance profile is advisory and does not establish capacity.</li><li>AI discovery findings remain hypotheses until a person reviews them.</li><li>Trusted source is required: dependency and container build scripts execute candidate code.</li></ul></article></div>`;
 }
 function focusSelector(element) {
   if (!element || !$('#content').contains(element)) return null;
@@ -131,11 +131,22 @@ function focusSelector(element) {
   const type = element.classList[0] ? `.${CSS.escape(element.classList[0])}` : '';
   return `${element.tagName}${type}[${name}="${CSS.escape(element.getAttribute(name))}"]`;
 }
+function announceRunStatus() {
+  const latest = state.runs[0];
+  const message = state.active
+    ? 'A run is in progress.'
+    : wasActive && latest
+      ? `Run finished: ${latest.status}.`
+      : $('#run-status').textContent;
+  wasActive = Boolean(state.active);
+  $('#run-status').textContent = message;
+}
 function render() {
   if (!state) return;
   const focused = focusSelector(document.activeElement),
     selection = document.activeElement?.id === 'search' ? $('#search').selectionStart : null;
   $('#project-name').textContent = state.project.name;
+  $('#app-version').textContent = `v${state.project.version}`;
   $('#nav-runs').textContent = state.runs.length;
   $('#nav-findings').textContent = activeFindings().length;
   const titles = {
@@ -154,6 +165,7 @@ function render() {
   $('#new-exploration').disabled = Boolean(state.active || state.starting);
   $('#new-run').disabled = Boolean(state.active || state.starting);
   $('#new-run').textContent = state.active || state.starting ? 'Validation running…' : '＋ Run validation';
+  announceRunStatus();
   $('#warnings').textContent = [...state.warnings, ...(state.lastLaunchError ? [state.lastLaunchError] : [])].join(' ');
   $('#warnings').hidden = !$('#warnings').textContent;
   $('#content').innerHTML =
@@ -203,7 +215,7 @@ function openLaunch(mode = 'validation') {
   $('#launch-dialog .option-box').hidden = discovery;
   $('#discovery-help').hidden = !discovery;
   $('#discovery-help').textContent = state.project.aiConfigured
-    ? `Uses ${state.project.model}. Up to 40 requests, 10 minutes, and 100,000 accounted tokens; the final response can exceed the token budget. Model usage is billed by your provider. Prior discoveries inform this run.`
+    ? `Uses ${state.project.model}. Up to ${state.project.limits.discovery.requests} requests, ${state.project.limits.discovery.minutes} minutes, and ${state.project.limits.discovery.tokens.toLocaleString('en-US')} accounted tokens; the final response can exceed the token budget. Model usage is billed by your provider. Prior discoveries inform this run.`
     : 'Configure ATM_PROVIDER, its API key, and ATM_MODEL on the runner to enable autonomous discovery.';
   $('#launch-error').hidden = true;
   $('#ai').checked = false;
@@ -211,7 +223,7 @@ function openLaunch(mode = 'validation') {
   $('#require-ai').disabled = true;
   $('#ai').disabled = !state.project.aiConfigured;
   $('#ai-help').textContent = state.project.aiConfigured
-    ? `Uses ${state.project.model}. Limited to 12 actions and 3 minutes; model usage is billed by your provider.`
+    ? `Uses ${state.project.model}. Limited to ${state.project.limits.ai.actions} actions and ${state.project.limits.ai.minutes} minutes; model usage is billed by your provider.`
     : 'To enable, set ATM_PROVIDER, its API key, and ATM_MODEL on the runner and restart the dashboard.';
   $('#launch-dialog').showModal();
   $('#revision').focus();
@@ -263,7 +275,7 @@ function performanceView(value) {
   const { report, advisory, comparison } = value;
   const number = n => (n === null ? '—' : Number(n).toFixed(1));
   const delta = n => `${n > 0 ? '+' : ''}${number(n)}`;
-  return `<section class="performance-panel" aria-label="Performance report"><h3>Performance · ${advisory ? 'Advisory' : 'Required'}</h3><p>${escapeHTML(titleCase(report.assessment.status))}. Donor reads: 12 synthetic accounts, 60 gifts each. Closed-loop load; warm-up excluded from assessment.</p><div class="performance-scroll" role="region" aria-label="Performance phase metrics" tabindex="0"><table><caption>Latency includes the complete response and failed requests. Throughput is successful requests per second.</caption><thead><tr><th scope="col">Phase</th><th scope="col">Users</th><th scope="col">Seconds</th><th scope="col">Requests</th><th scope="col">p50 ms</th><th scope="col">p95 ms</th><th scope="col">p99 ms</th><th scope="col">Success/s</th><th scope="col">Errors</th><th scope="col">Timeouts</th></tr></thead><tbody>${report.phases.map(p => `<tr><th scope="row">${escapeHTML(titleCase(p.name))}</th><td>${p.concurrency}</td><td>${number(p.elapsedMs / 1000)}</td><td>${p.requests}</td><td>${number(p.p50Ms)}</td><td>${number(p.p95Ms)}</td><td>${number(p.p99Ms)}</td><td>${number(p.successfulThroughput)}</td><td>${number(p.errorRate === null ? null : p.errorRate * 100)}%</td><td>${p.timeouts}</td></tr>`).join('')}</tbody></table></div><p>Budgets: p95 ${report.profile.criteria.maxP95Ms === null ? 'not set' : `${number(report.profile.criteria.maxP95Ms)} ms`}; errors ${report.profile.criteria.maxErrorRate === null ? 'not set' : `${number(report.profile.criteria.maxErrorRate * 100)}%`}. ${advisory ? 'Results do not block acceptance.' : ''}</p>${report.assessment.reasons.map(r => `<p>${escapeHTML(r)}</p>`).join('')}<h4>Candidate comparison</h4>${
+  return `<section class="performance-panel" aria-label="Performance report"><h3>Performance · ${advisory ? 'Advisory' : 'Required'}</h3><p>${escapeHTML(titleCase(report.assessment.status))}. Donor reads use synthetic accounts with seeded gift history. Closed-loop load; warm-up excluded from assessment.</p><div class="performance-scroll" role="region" aria-label="Performance phase metrics" tabindex="0"><table><caption>Latency includes the complete response and failed requests. Throughput is successful requests per second.</caption><thead><tr><th scope="col">Phase</th><th scope="col">Users</th><th scope="col">Seconds</th><th scope="col">Requests</th><th scope="col">p50 ms</th><th scope="col">p95 ms</th><th scope="col">p99 ms</th><th scope="col">Success/s</th><th scope="col">Errors</th><th scope="col">Timeouts</th></tr></thead><tbody>${report.phases.map(p => `<tr><th scope="row">${escapeHTML(titleCase(p.name))}</th><td>${p.concurrency}</td><td>${number(p.elapsedMs / 1000)}</td><td>${p.requests}</td><td>${number(p.p50Ms)}</td><td>${number(p.p95Ms)}</td><td>${number(p.p99Ms)}</td><td>${number(p.successfulThroughput)}</td><td>${number(p.errorRate === null ? null : p.errorRate * 100)}%</td><td>${p.timeouts}</td></tr>`).join('')}</tbody></table></div><p>Budgets: p95 ${report.profile.criteria.maxP95Ms === null ? 'not set' : `${number(report.profile.criteria.maxP95Ms)} ms`}; errors ${report.profile.criteria.maxErrorRate === null ? 'not set' : `${number(report.profile.criteria.maxErrorRate * 100)}%`}. ${advisory ? 'Results do not block acceptance.' : ''}</p>${report.assessment.reasons.map(r => `<p>${escapeHTML(r)}</p>`).join('')}<h4>Candidate comparison</h4>${
     comparison.comparable
       ? `<p>${comparison.regression ? 'Regression signal detected' : 'No regression signal detected'} against <button class="text-button" data-run="${escapeHTML(comparison.baselineId)}">${escapeHTML(comparison.revision.slice(0, 8))}</button>. Same workload and environment metadata; measurements may still vary.</p><ul>${comparison.changes
           .filter(c => c.endpoint === 'overall' || c.regression)
@@ -292,10 +304,10 @@ async function showRun(id, open = true) {
       element.getAttribute('data-check'),
     );
     $('#run-detail').innerHTML =
-      `<div class="dialog-top"><div><div class="eyebrow">${summary.mode === 'exploration' ? 'EXPLORATION EVIDENCE' : 'VALIDATION EVIDENCE'}</div><h2 id="run-title">${escapeHTML(date(run.startedAt))}</h2></div><button class="icon-button close-dialog" aria-label="Close run details">×</button></div><div class="detail-meta">${badge(summary.status, summary.mode)}<code class="commit">${escapeHTML(summary.revision.slice(0, 12))}</code><small>${escapeHTML(duration(summary.durationMs))} · ${escapeHTML(runLabel(summary))}</small></div>${discoveryView(data.discovery, id)}${performanceView(data.performance)}<div class="detail-grid"><section aria-label="Checks">${run.results.map(r => `<details class="check-row" data-check="${escapeHTML(r.id)}" ${openChecks.includes(r.id) || r.status !== 'passed' ? 'open' : ''}><summary><span>${escapeHTML(r.id)}${r.required ? '' : ' · advisory'}</span>${badge(!r.finishedAt && active ? 'running' : r.status)}</summary><p>${escapeHTML(!r.finishedAt && active ? 'Check in progress. Evidence appears when the check completes.' : r.summary)}</p><div class="evidence-links">${evidenceLinks(id, r.evidence)}</div></details>`).join('') || '<p>Preparing the candidate…</p>'}</section><aside class="detail-aside"><h3>Local acceptance</h3><p><strong>${release?.scope === 'exploration' ? 'Not applicable — exploration' : release?.eligible ? 'Eligible' : 'Blocked'}</strong> · current assessment</p>${(release?.reasons ?? ['Assessment unavailable.']).map(reason => `<p>${escapeHTML(reason)}</p>`).join('')}<h3>Recorded policy</h3><p>${escapeHTML(run.policy?.definition ? `${run.policy.definition.id} · ${run.policy.definition.version}` : 'Legacy run: no versioned policy')}</p><code class="policy-digest">${escapeHTML(run.policy?.digest ?? '')}</code>${run.policy?.scenarios?.map(s => `<details><summary>${escapeHTML(s.id)} · v${s.version}</summary><p>${escapeHTML(s.goal)}</p><strong>Success criteria</strong><ul>${s.successCriteria.map(c => `<li>${escapeHTML(c)}</li>`).join('')}</ul></details>`).join('') ?? ''}${run.release ? `<p>At completion: ${escapeHTML(run.release.status)}. Current evidence and finding assessments may change eligibility.</p>` : ''}<hr><h3>Evidence integrity</h3><div class="integrity ${integrity.status}">${integrity.status === 'verified' ? '✓ Recorded evidence hashes match' : 'Evidence needs attention'}</div>${integrity.issues.map(issue => `<p>${escapeHTML(issue)}</p>`).join('')}<hr><h3>Compared with previous run</h3>${comparison ? `<p>${escapeHTML(comparison.revision?.slice(0, 8) ?? 'Unresolved revision')}</p>${comparison.changes.length ? comparison.changes.map(c => `<div class="change"><strong>${escapeHTML(c.check)}</strong>${escapeHTML(c.before)} <span class="arrow">→</span> ${escapeHTML(c.after)}</div>`).join('') : '<p>No check status changes.</p>'}${comparison.removed.length ? `<p>Not present: ${escapeHTML(comparison.removed.join(', '))}</p>` : ''}<button class="text-button" data-run="${escapeHTML(comparison.baselineId)}">View previous run →</button>` : '<p>This is the first comparable run.</p>'}<hr><h3>Acceptance scope</h3><p>Eligibility applies to the recorded local policy. Production promotion is not authorized. Finding triage cannot override a failed required check.</p></aside></div><div class="dialog-actions">${active ? `<button class="button secondary" data-cancel="${escapeHTML(id)}" ${state.active.cancelRequested ? 'disabled' : ''}>${state.active.cancelRequested ? 'Canceling & cleaning up…' : 'Cancel validation'}</button>` : `<button class="button secondary" data-rerun="${escapeHTML(summary.revision)}" data-mode="${escapeHTML(summary.mode)}" ${state.active ? 'disabled' : ''}>Run this revision again</button>`}<button class="button primary close-dialog">Done</button></div>`;
+      `<div class="dialog-top"><div><div class="eyebrow">${summary.mode === 'exploration' ? 'EXPLORATION EVIDENCE' : 'VALIDATION EVIDENCE'}</div><h2 id="run-title">${escapeHTML(date(run.startedAt))}</h2></div><button class="icon-button close-dialog" aria-label="Close run details">×</button></div><div class="detail-meta">${badge(summary.status, summary.mode)}<code class="commit">${escapeHTML(summary.revision.slice(0, 12))}</code><small>${escapeHTML(duration(summary.durationMs))} · ${escapeHTML(runLabel(summary))}</small></div>${discoveryView(data.discovery, id)}${performanceView(data.performance)}<div class="detail-grid"><section aria-label="Checks">${run.results.map(r => `<details class="check-row" data-check="${escapeHTML(r.id)}" ${openChecks.includes(r.id) || r.status !== 'passed' ? 'open' : ''}><summary><span>${escapeHTML(r.id)}${r.required ? '' : ' · advisory'}</span>${badge(!r.finishedAt && active ? 'running' : r.status)}</summary><p>${escapeHTML(!r.finishedAt && active ? 'Check in progress. Evidence appears when the check completes.' : r.summary)}</p><div class="evidence-links">${evidenceLinks(id, r.evidence)}</div></details>`).join('') || '<p>Preparing the candidate…</p>'}</section><aside class="detail-aside"><h3>Local acceptance</h3><p><strong>${release?.scope === 'exploration' ? 'Not applicable — exploration' : release?.eligible ? 'Eligible' : 'Blocked'}</strong> · current assessment</p>${(release?.reasons ?? ['Assessment unavailable.']).map(reason => `<p>${escapeHTML(reason)}</p>`).join('')}<h3>Recorded policy</h3><p>${escapeHTML(run.policy?.definition ? `${run.policy.definition.id} · ${run.policy.definition.version}` : 'Legacy run: no versioned policy')}</p><code class="policy-digest">${escapeHTML(run.policy?.digest ?? '')}</code>${run.policy?.scenarios?.map(s => `<details><summary>${escapeHTML(s.id)} · v${escapeHTML(s.version)}</summary><p>${escapeHTML(s.goal)}</p><strong>Success criteria</strong><ul>${s.successCriteria.map(c => `<li>${escapeHTML(c)}</li>`).join('')}</ul></details>`).join('') ?? ''}${run.release ? `<p>At completion: ${escapeHTML(run.release.status)}. Current evidence and finding assessments may change eligibility.</p>` : ''}<hr><h3>Evidence integrity</h3><div class="integrity ${escapeHTML(integrity.status)}">${integrity.status === 'verified' ? '✓ Recorded evidence hashes match' : 'Evidence needs attention'}</div>${integrity.issues.map(issue => `<p>${escapeHTML(issue)}</p>`).join('')}<hr><h3>Compared with previous run</h3>${comparison ? `<p>${escapeHTML(comparison.revision?.slice(0, 8) ?? 'Unresolved revision')}</p>${comparison.changes.length ? comparison.changes.map(c => `<div class="change"><strong>${escapeHTML(c.check)}</strong>${escapeHTML(c.before)} <span class="arrow">→</span> ${escapeHTML(c.after)}</div>`).join('') : '<p>No check status changes.</p>'}${comparison.removed.length ? `<p>Not present: ${escapeHTML(comparison.removed.join(', '))}</p>` : ''}<button class="text-button" data-run="${escapeHTML(comparison.baselineId)}">View previous run →</button>` : '<p>This is the first comparable run.</p>'}<hr><h3>Acceptance scope</h3><p>Eligibility applies to the recorded local policy. Production promotion is not authorized. Finding triage cannot override a failed required check.</p></aside></div><div class="dialog-actions">${active ? `<button class="button secondary" data-cancel="${escapeHTML(id)}" ${state.active.cancelRequested ? 'disabled' : ''}>${state.active.cancelRequested ? 'Canceling & cleaning up…' : 'Cancel validation'}</button>` : `<button class="button secondary" data-rerun="${escapeHTML(summary.revision)}" data-mode="${escapeHTML(summary.mode)}" ${state.active ? 'disabled' : ''}>Run this revision again</button>`}<button class="button primary close-dialog">Done</button></div>`;
     if (open && !$('#run-dialog').open) $('#run-dialog').showModal();
   } catch (error) {
-    toast(error.message);
+    if (open) toast(error.message);
   }
 }
 function reproduction(finding) {

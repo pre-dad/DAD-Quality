@@ -10,6 +10,7 @@ import { validatePolicy } from '../src/policy.js';
 import { evaluateRelease } from '../src/release.js';
 import { Run } from '../src/core.js';
 import { collectFindings } from '../src/history.js';
+import { sourceReader } from '../src/source-reader.js';
 
 const signal = new AbortController().signal;
 const action = (kind, fields = {}) => ({
@@ -71,6 +72,32 @@ const fakeBrowser = () => ({
   pages: () => [{ path: '/', title: 'Home', visitedBy: ['guest'] }],
   act: async () => {},
   reproduce: async () => ({ status: 'reproduced', observation }),
+});
+
+test('a duplicate report is not replayed and is reported as already reported', async () => {
+  let reproductions = 0;
+  const decisions = [
+    action('investigate', { title: 'Understand the home page' }),
+    action('report', { title: 'Missing welcome', expectation: 'text_absent', text: 'Welcome' }),
+    action('report', { title: 'Missing welcome', expectation: 'text_absent', text: 'Welcome' }),
+    action('finish'),
+  ];
+  const report = blank();
+  await discover({
+    provider: async () => ({ action: decisions.shift(), tokens: 20 }),
+    browser: {
+      ...fakeBrowser(),
+      reproduce: async () => {
+        reproductions++;
+        return { status: 'reproduced', observation };
+      },
+    },
+    report,
+    signal,
+  });
+  assert.equal(reproductions, 1);
+  assert.equal(report.findings.length, 1);
+  assert.ok(report.events.some(e => e.outcome === 'Already reported.'));
 });
 
 test('discovery chooses goals through decisions, rejects unsupported reports and never treats finish as release approval', async () => {
@@ -281,6 +308,33 @@ test('exploration persists partial reports, safely redacts JSON and cleans up af
   assert.equal(run.data.results.find(r => r.id === 'discovery').status, 'inconclusive');
 });
 
+test('exploration redacts secrets from the persisted summary and the check result', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-discovery-summary-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const run = await executeDiscovery({
+    repo: root,
+    output: root,
+    provider: async () => ({ action: action('reload'), tokens: 1 }),
+    adapterFactory: run => ({
+      snapshot: async () => {
+        run.data.candidate = { source: '/app', revision: 'a'.repeat(40) };
+      },
+      docker: async () => {},
+      build: async () => {},
+      database: async () => {},
+      deploy: async () => {},
+      discoveryFixture: async () => [],
+      cleanup: async () => {},
+    }),
+    browserFactory: async () => {
+      throw new Error('Launch failed: http://127.0.0.1/cb?token=abc123secret');
+    },
+  });
+  const report = await readDiscovery(root, run.data);
+  assert.doesNotMatch(report.summary, /abc123secret/);
+  assert.doesNotMatch(run.data.results.find(r => r.id === 'discovery').summary, /abc123secret/);
+});
+
 test('verified memory crosses runs only within a repository; hypotheses remain reviewable and corrupt evidence is excluded', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'atm-discover-memory-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -362,4 +416,16 @@ test('provider rejection usage is accounted and unknown usage stays explicit', a
     assert.equal(report.tokens, known ? 29 : 0);
     assert.equal(Boolean(report.usageIncomplete), !known);
   }
+});
+
+test('read_source returns a bounded excerpt of a line longer than the page budget and lets the reader advance', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'atm-source-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'bundle.js'), `${'x'.repeat(20_000)}\nsecond line\n`);
+  const reader = await sourceReader(root);
+  const first = await reader.act({ action: 'read_source', target: 'bundle.js', value: '1' });
+  assert.equal(first.end, 1);
+  assert.ok(first.text.length > 0 && first.text.length <= 12_000);
+  const next = await reader.act({ action: 'read_source', target: 'bundle.js', value: String(first.end + 1) });
+  assert.match(next.text, /2: second line/);
 });

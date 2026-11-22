@@ -190,6 +190,8 @@ test('triage persists across restarts and evidence route serves only listed regu
     200,
   );
   assert.equal((await fetch(`${app.origin}/evidence/${run.data.id}/compose.json`)).status, 404);
+  assert.equal((await fetch(`${app.origin}/api/runs/atm-00000000000000-00000000`)).status, 404);
+  assert.equal((await fetch(`${app.origin}/api/runs/not-a-run-id`)).status, 404);
   assert.equal((await fetch(`${app.origin}/evidence/${run.data.id}/api-tests.log`)).status, 200);
   const original = await readFile(path.join(run.dir, 'run.json'), 'utf8');
   await app.close();
@@ -244,7 +246,7 @@ test('commit watch baselines current revision, runs only new commits and survive
   assert.equal(executions, 1);
 });
 
-// Phase 2: the dashboard is target-aware. A non-dad target explores only, labels its
+// The dashboard is target-aware. A non-dad target explores only, labels its
 // own profile, and threads target + configFile into the explorer.
 test('a generic-web dashboard labels its profile, refuses validation, and threads target into explore', async t => {
   const root = await directory(t);
@@ -270,6 +272,14 @@ test('a generic-web dashboard labels its profile, refuses validation, and thread
   const snapshot = await dashboard.snapshot();
   assert.equal(snapshot.project.target, 'generic-web');
   assert.equal(snapshot.project.profile, 'generic-web · discovery');
+  assert.equal(
+    snapshot.project.version,
+    JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version,
+  );
+  assert.deepEqual(snapshot.project.limits, {
+    discovery: { requests: 40, minutes: 10, tokens: 100_000 },
+    ai: { actions: 12, minutes: 3 },
+  });
 
   await assert.rejects(
     dashboard.start({ mode: 'validation' }),

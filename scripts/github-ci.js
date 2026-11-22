@@ -7,35 +7,61 @@ import { emptyLedger, validateLedger, prepareProposal, publishProposal, extractB
 import { atomicJSON, digest } from '../src/core.js';
 
 process.umask(0o077);
-const {
-  values: v,
-  positionals: [action],
-} = parseArgs({
-  allowPositionals: true,
-  options: Object.fromEntries(
-    [
-      'repo',
-      'revision',
-      'source',
-      'state',
-      'output',
-      'public-key',
-      'private-key',
-      'execution',
-      'proposal',
-      'bundle',
-      'artifact-id',
-      'artifact-digest',
-      'finding',
-      'severity',
-      'disposition',
-      'actor',
-      'note-file',
-    ].map(k => [k, { type: 'string' }]),
-  ),
-});
+let v, action;
+try {
+  ({
+    values: v,
+    positionals: [action],
+  } = parseArgs({
+    allowPositionals: true,
+    options: Object.fromEntries(
+      [
+        'repo',
+        'revision',
+        'source',
+        'state',
+        'output',
+        'public-key',
+        'private-key',
+        'execution',
+        'proposal',
+        'bundle',
+        'artifact-id',
+        'artifact-digest',
+        'finding',
+        'severity',
+        'disposition',
+        'actor',
+        'note-file',
+      ].map(k => [k, { type: 'string' }]),
+    ),
+  }));
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}
+const required = {
+  init: ['state', 'source'],
+  keygen: ['private-key', 'public-key'],
+  run: ['repo', 'revision', 'source', 'state', 'public-key', 'output', 'execution'],
+  publish: [
+    'state',
+    'proposal',
+    'source',
+    'execution',
+    'revision',
+    'artifact-id',
+    'artifact-digest',
+    'bundle',
+    'output',
+  ],
+  triage: ['state', 'source', 'finding', 'note-file', 'severity', 'disposition', 'actor'],
+  decrypt: ['bundle', 'private-key', 'output'],
+};
 const json = async file => JSON.parse(await readFile(file, 'utf8'));
 try {
+  const missing = (required[action] ?? []).filter(name => v[name] === undefined);
+  if (missing.length) throw new Error(`Missing required option(s): ${missing.map(name => `--${name}`).join(', ')}.`);
   if (action === 'init') {
     // Explicit bootstrap only: normal execution never creates missing history.
     await writeFile(v.state, `${JSON.stringify(emptyLedger(v.source), null, 2)}\n`, { flag: 'wx', mode: 0o600 });

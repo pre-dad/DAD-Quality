@@ -5,8 +5,24 @@ import { DadAdapter } from './targets/dad/index.js';
 import { staffJourney, donorClaimJourney } from './browser.js';
 import { publicAgent } from './agent.js';
 import { loadPolicy } from './policy.js';
-import { assessRelease } from './release.js';
+import { assessRelease, evaluateRelease } from './release.js';
 import { performanceCheck } from './performance.js';
+
+// The run is saved even when assessment fails, so the evidence stays readable and
+// the failure is recorded in the acceptance reasons before it propagates.
+async function assessAndSave(run, output) {
+  let failure;
+  try {
+    run.data.release = await assessRelease(path.resolve(output), run.data);
+  } catch (error) {
+    failure = error;
+    run.data.release = evaluateRelease(run.data, {
+      inputIssues: [`Local acceptance could not be assessed: ${error.message}`],
+    });
+  }
+  await run.save();
+  if (failure) throw failure;
+}
 
 /**
  * @param {{repo: string, revision?: string, sourceIdentity?: string, output?: string, policy?: string, ai?: boolean,
@@ -32,14 +48,15 @@ export async function executeRun({
     throw new Error('Use the explore command for autonomous discovery.');
   const checks = policy.definition.checks;
   const required = checks.filter(c => c.required).map(c => c.id);
-  const config = checks.some(c => c.id === 'ai-public-journey') ? modelConfig({ model, providerName }) : {};
+  const usesAI = checks.some(c => c.id === 'ai-public-journey');
+  const config = usesAI ? modelConfig({ model, providerName }) : {};
   model = config.model ?? model;
   const run = await Run.create(
     output,
     {
       adapter: 'impactgraph',
       revision,
-      ai: checks.some(c => c.id === 'ai-public-journey'),
+      ai: usesAI,
       model,
       provider: config.providerName,
       trigger,
@@ -102,8 +119,7 @@ export async function executeRun({
     }
     if (signal.aborted) run.data.canceledAt = new Date().toISOString();
     await run.finish();
-    run.data.release = await assessRelease(path.resolve(output), run.data);
-    await run.save();
+    await assessAndSave(run, output);
   }
   console.log(
     `\nChecks: ${run.data.decision.status.toUpperCase()} · Local acceptance: ${run.data.release.status.toUpperCase()} · ${path.join(run.dir, 'report.html')}`,
